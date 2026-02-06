@@ -26,9 +26,6 @@ MY_STORES = {
     ],
     'kaufland': [
         {'id': 'HR5630', 'name': 'Kaufland Jankomir'}
-    ],
-    'lidl': [
-        {'id': 'HR00248', 'name': 'Lidl Huzjanova'}
     ]
 }
 
@@ -374,7 +371,6 @@ def fetch_fresh_data():
     results.extend(check_spar())
     results.extend(check_konzum())
     results.extend(check_kaufland())
-    results.extend(check_lidl())
     
     print(f"Total stores: {len(results)}")
     
