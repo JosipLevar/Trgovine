@@ -6,7 +6,6 @@ from threading import Lock
 
 app = Flask(__name__)
 
-# Cache za podatke
 cache = {
     'data': None,
     'timestamp': None,
@@ -14,10 +13,8 @@ cache = {
 }
 cache_lock = Lock()
 
-# Cache traje 6 sati
 CACHE_DURATION_HOURS = 6
 
-# Tvoje trgovine
 MY_STORES = {
     'spar': [
         {'id': 38, 'name': 'SPAR Gospodska'},
@@ -36,7 +33,6 @@ MY_STORES = {
 }
 
 def get_next_sunday():
-    """Izračunaj sljedeću nedjelju"""
     today = datetime.now()
     days_ahead = 6 - today.weekday()
     if days_ahead <= 0:
@@ -44,18 +40,15 @@ def get_next_sunday():
     return today + timedelta(days_ahead)
 
 def is_cache_valid():
-    """Provjeri je li cache još valjan"""
     if cache['data'] is None or cache['timestamp'] is None:
         return False
     
     now = datetime.now()
     next_sunday = get_next_sunday().date()
     
-    # Ako se promijenila nedjelja, cache nije valjan
     if cache['date'] != next_sunday:
         return False
     
-    # Ako je prošlo više od 6 sati, cache nije valjan
     time_diff = now - cache['timestamp']
     if time_diff.total_seconds() > CACHE_DURATION_HOURS * 3600:
         return False
@@ -65,32 +58,54 @@ def is_cache_valid():
 def check_spar():
     """Provjeri Spar trgovine"""
     results = []
+    
+    # Dodaj fallback za sve trgovine odmah
+    for my_store in MY_STORES['spar']:
+        results.append({
+            'chain': 'SPAR',
+            'name': my_store['name'],
+            'open': False,
+            'hours': 'Provjeravam...'
+        })
+    
     try:
+        print("Checking Spar...")
         url = "https://www.spar.hr/lokacije/_jcr_content.stores.v2.html"
         params = {'latitude': 45.8133064, 'longitude': 15.8867033, 'radius': 40}
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
         all_stores = response.json()
         
+        print(f"Spar API returned {len(all_stores)} stores")
+        
         next_sunday = get_next_sunday()
+        results = []  # Reset nakon uspješnog API poziva
         
         for my_store in MY_STORES['spar']:
+            found = False
             for store in all_stores:
-                if store['locationId'] == my_store['id']:
+                if store.get('locationId') == my_store['id']:
+                    found = True
                     is_closed = False
+                    
                     for special in store.get('specialShopHours', []):
                         if special.get('dayType'):
-                            special_date = datetime(
-                                special['dayType']['year'],
-                                special['dayType']['month'] + 1,
-                                special['dayType']['dayOfMonth']
-                            )
-                            if special_date.date() == next_sunday.date() and special.get('from1') is None:
-                                is_closed = True
-                                break
+                            try:
+                                special_date = datetime(
+                                    special['dayType']['year'],
+                                    special['dayType']['month'] + 1,
+                                    special['dayType']['dayOfMonth']
+                                )
+                                if special_date.date() == next_sunday.date() and special.get('from1') is None:
+                                    is_closed = True
+                                    break
+                            except Exception as e:
+                                print(f"Error parsing special hours: {e}")
+                                continue
                     
                     if not is_closed:
                         for hours in store.get('shopHours', []):
-                            if hours['dayType'] == 'nedjelja':
+                            if hours.get('dayType') == 'nedjelja':
                                 from_h = hours['from1']['hourOfDay']
                                 from_m = hours['from1']['minute']
                                 to_h = hours['to1']['hourOfDay']
@@ -109,35 +124,91 @@ def check_spar():
                             'open': False,
                             'hours': 'Zatvoreno'
                         })
+                    break
+            
+            if not found:
+                results.append({
+                    'chain': 'SPAR',
+                    'name': my_store['name'],
+                    'open': False,
+                    'hours': 'Trgovina ne postoji u bazi'
+                })
+                
     except Exception as e:
         print(f"Spar error: {e}")
+        # Vrati fallback s greškom
+        results = []
+        for my_store in MY_STORES['spar']:
+            results.append({
+                'chain': 'SPAR',
+                'name': my_store['name'],
+                'open': False,
+                'hours': f'Greška: {str(e)[:30]}'
+            })
     
     return results
 
 def check_konzum():
     """Provjeri Konzum trgovine"""
     results = []
+    
+    # Fallback
+    for my_store in MY_STORES['konzum']:
+        results.append({
+            'chain': 'KONZUM',
+            'name': my_store['name'],
+            'open': False,
+            'hours': 'Provjeravam...'
+        })
+    
     try:
+        print("Checking Konzum...")
         url = "https://trgovine.konzum.hr/api/locations/"
-        response = requests.get(url, timeout=10)
-        all_stores = response.json()
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        
+        data = response.json()
+        print(f"Konzum API response type: {type(data)}")
+        
+        if isinstance(data, dict):
+            all_stores = data.get('locations', []) or data.get('data', []) or []
+        elif isinstance(data, list):
+            all_stores = data
+        else:
+            all_stores = []
+        
+        print(f"Konzum stores found: {len(all_stores)}")
+        
+        results = []  # Reset
         
         for my_store in MY_STORES['konzum']:
+            found = False
             for store in all_stores:
-                if store['id'] == my_store['id']:
-                    if store['open_this_sunday']:
-                        work_hours = json.loads(store['work_hours'])
-                        for day in work_hours:
-                            if day['name'] == 'Nedjelja' and day['from_hour']:
-                                from_time = day['from_hour'].split('T')[1][:5]
-                                to_time = day['to_hour'].split('T')[1][:5]
-                                results.append({
-                                    'chain': 'KONZUM',
-                                    'name': my_store['name'],
-                                    'open': True,
-                                    'hours': f"{from_time} - {to_time}"
-                                })
-                                break
+                if store.get('id') == my_store['id']:
+                    found = True
+                    if store.get('open_this_sunday'):
+                        work_hours_str = store.get('work_hours', '[]')
+                        try:
+                            work_hours = json.loads(work_hours_str)
+                            for day in work_hours:
+                                if day.get('name') == 'Nedjelja' and day.get('from_hour'):
+                                    from_time = day['from_hour'].split('T')[1][:5]
+                                    to_time = day['to_hour'].split('T')[1][:5]
+                                    results.append({
+                                        'chain': 'KONZUM',
+                                        'name': my_store['name'],
+                                        'open': True,
+                                        'hours': f"{from_time} - {to_time}"
+                                    })
+                                    break
+                        except Exception as e:
+                            print(f"Konzum parse error: {e}")
+                            results.append({
+                                'chain': 'KONZUM',
+                                'name': my_store['name'],
+                                'open': False,
+                                'hours': 'Greška u parsiranju'
+                            })
                     else:
                         results.append({
                             'chain': 'KONZUM',
@@ -145,18 +216,39 @@ def check_konzum():
                             'open': False,
                             'hours': 'Zatvoreno'
                         })
+                    break
+            
+            if not found:
+                results.append({
+                    'chain': 'KONZUM',
+                    'name': my_store['name'],
+                    'open': False,
+                    'hours': 'Trgovina ne postoji u bazi'
+                })
+                
     except Exception as e:
         print(f"Konzum error: {e}")
+        results = []
+        for my_store in MY_STORES['konzum']:
+            results.append({
+                'chain': 'KONZUM',
+                'name': my_store['name'],
+                'open': False,
+                'hours': f'Greška: {str(e)[:30]}'
+            })
     
     return results
 
 def check_kaufland():
     """Provjeri Kaufland trgovine"""
     results = []
-    try:
-        for my_store in MY_STORES['kaufland']:
+    
+    for my_store in MY_STORES['kaufland']:
+        try:
+            print(f"Checking Kaufland {my_store['id']}...")
             url = f"https://www.kaufland.hr/.klstorebygeo.storeName={my_store['id']}.json"
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=15)
+            response.raise_for_status()
             store = response.json()
             
             for day in store.get('wod', []):
@@ -180,15 +272,32 @@ def check_kaufland():
                                 'hours': f"{from_time} - {to_time}"
                             })
                     break
-    except Exception as e:
-        print(f"Kaufland error: {e}")
+        except Exception as e:
+            print(f"Kaufland error: {e}")
+            results.append({
+                'chain': 'KAUFLAND',
+                'name': my_store['name'],
+                'open': False,
+                'hours': f'Greška: {str(e)[:30]}'
+            })
     
     return results
 
 def check_lidl():
     """Provjeri Lidl trgovine"""
     results = []
+    
+    # Fallback
+    for my_store in MY_STORES['lidl']:
+        results.append({
+            'chain': 'LIDL',
+            'name': my_store['name'],
+            'open': False,
+            'hours': 'Provjeravam...'
+        })
+    
     try:
+        print("Checking Lidl...")
         url = "https://live.api.schwarz/odj/stores-api/v2/myapi/stores-frontend/stores"
         params = {
             'limit': 100,
@@ -196,19 +305,29 @@ def check_lidl():
             'country_code': 'HR',
             'geo_box': '45.6:15.7:46.0:16.0'
         }
-        response = requests.get(url, params=params, timeout=10)
-        all_stores = response.json().get('results', [])
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        
+        data = response.json()
+        all_stores = data.get('results', [])
+        
+        print(f"Lidl stores found: {len(all_stores)}")
         
         next_sunday = get_next_sunday().strftime('%Y-%m-%d')
+        results = []  # Reset
         
         for my_store in MY_STORES['lidl']:
+            found = False
             for store in all_stores:
-                if store['objectNumber'] == my_store['id']:
-                    for day in store['openingHours']['items']:
-                        if day['date'] == next_sunday:
-                            if day['timeRanges']:
-                                from_time = day['timeRanges'][0]['from'].split('T')[1][:5]
-                                to_time = day['timeRanges'][0]['to'].split('T')[1][:5]
+                if store.get('objectNumber') == my_store['id']:
+                    found = True
+                    opening_hours = store.get('openingHours', {}).get('items', [])
+                    for day in opening_hours:
+                        if day.get('date') == next_sunday:
+                            time_ranges = day.get('timeRanges', [])
+                            if time_ranges:
+                                from_time = time_ranges[0]['from'].split('T')[1][:5]
+                                to_time = time_ranges[0]['to'].split('T')[1][:5]
                                 results.append({
                                     'chain': 'LIDL',
                                     'name': my_store['name'],
@@ -223,13 +342,32 @@ def check_lidl():
                                     'hours': 'Zatvoreno'
                                 })
                             break
+                    break
+            
+            if not found:
+                results.append({
+                    'chain': 'LIDL',
+                    'name': my_store['name'],
+                    'open': False,
+                    'hours': 'Trgovina ne postoji u bazi'
+                })
+                
     except Exception as e:
         print(f"Lidl error: {e}")
+        results = []
+        for my_store in MY_STORES['lidl']:
+            results.append({
+                'chain': 'LIDL',
+                'name': my_store['name'],
+                'open': False,
+                'hours': f'Greška: {str(e)[:30]}'
+            })
     
     return results
 
 def fetch_fresh_data():
-    """Dohvati svježe podatke sa svih API-ja"""
+    """Dohvati podatke sa svih API-ja"""
+    print("=== FETCHING FRESH DATA ===")
     next_sunday = get_next_sunday()
     
     results = []
@@ -237,6 +375,8 @@ def fetch_fresh_data():
     results.extend(check_konzum())
     results.extend(check_kaufland())
     results.extend(check_lidl())
+    
+    print(f"Total stores: {len(results)}")
     
     results.sort(key=lambda x: (not x['open'], x['chain'], x['name']))
     
@@ -260,29 +400,23 @@ def index():
 
 @app.route('/api/check')
 def check_all():
-    """API endpoint s cachingom"""
     try:
         with cache_lock:
             if is_cache_valid():
-                # Vrati cached podatke
                 result = cache['data'].copy()
                 result['cached'] = True
                 return jsonify(result)
             else:
-                # Dohvati nove podatke
                 data = fetch_fresh_data()
-                
-                # Spremi u cache
                 cache['data'] = data
                 cache['timestamp'] = datetime.now()
                 cache['date'] = get_next_sunday().date()
-                
                 return jsonify(data)
                 
     except Exception as e:
+        print(f"API check error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# HTML Template
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="hr">
@@ -554,7 +688,6 @@ HTML_TEMPLATE = '''
                 });
         }
         
-        // Učitaj samo jednom pri otvaranju
         loadData();
     </script>
 </body>
