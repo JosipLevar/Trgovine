@@ -428,7 +428,7 @@ def check_all():
         print(f"API check error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-HTML_TEMPLATE = '''<!DOCTYPE html>
+HTML_TEMPLATE = f'''<!DOCTYPE html>
 <html lang="hr">
 <head>
 <meta charset="UTF-8">
@@ -510,28 +510,7 @@ h1{color:#333;font-size:1.8em;margin-bottom:5px}
 <button class="refresh-btn" onclick="loadData()">🔄 Osvježi podatke</button>
 </div>
 <div class="footer">Podaci se cachiraju 6 sati</div>
-<script>
-function loadData(){
-document.getElementById('results').innerHTML='<div class="loading"><div class="spinner"></div>Učitavam podatke...</div>';
-fetch('/api/check')
-.then(response=>response.json())
-.then(data=>{
-if(!data.success)throw new Error(data.error||'Nepoznata greška');
-const cacheStatus=data.cached?`💾 Cached podaci (${data.last_update})`:`🔄 Osvježeno (${data.last_update})`;
-let html=`<div class="date-banner">📅 ${data.day}, ${data.date}</div><div class="cache-info ${data.cached?'cached':''}">${cacheStatus}</div><div class="summary"><div class="summary-card open"><div class="number">${data.summary.open}</div><div class="label">RADI</div></div><div class="summary-card closed"><div class="number">${data.summary.closed}</div><div class="label">ZATVORENO</div></div></div>`;
-data.stores.forEach(store=>{
-const icon=store.open?'✅':'❌';
-const statusClass=store.open?'open':'closed';
-html+=`<div class="store"><div class="store-icon">${icon}</div><div class="store-info"><div class="store-chain">${store.chain}</div><div class="store-name">${store.name}</div><span class="store-hours ${statusClass}">${store.hours}</span></div></div>`;
-});
-document.getElementById('results').innerHTML=html;
-})
-.catch(error=>{
-document.getElementById('results').innerHTML=`<div class="error"><strong>⚠️ Greška:</strong><br>${error.message}</div>`;
-});
-}
-loadData();
-</script>
+<script src="/static/app.js?v={STATIC_VERSION}"></script>
 </body>
 </html>'''
 
