@@ -471,6 +471,17 @@ def check_muller(stores_config):
     results = []
     muller_stores = stores_config.get('muller', [])
 
+    # Müller GraphQL API credentials
+    muller_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'hr-HR,hr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Authorization': 'Basic V3BaMGdPOURURlpFZXVRSTpZUHhsZmxyVWlmQnpbWGhC',
+        'Content-Type': 'application/json',
+        'Origin': 'https://www.mueller.hr',
+        'Referer': 'https://www.mueller.hr/'
+    }
+
     for my_store in muller_stores:
         store_id = my_store['storeId']
         name = my_store['name']
@@ -478,7 +489,6 @@ def check_muller(stores_config):
         try:
             print(f"Checking Müller {store_id} via GraphQL API...")
             
-            # GraphQL persisted query endpoint
             url = "https://backend.prod.ecom.mueller.hr/"
             params = {
                 'operatingChain': 'B2C_HR_Store',
@@ -495,7 +505,7 @@ def check_muller(stores_config):
                 })
             }
             
-            response = requests.get(url, params=params, timeout=15, headers=HEADERS)
+            response = requests.get(url, params=params, headers=muller_headers, timeout=15)
             response.raise_for_status()
             data = response.json()
             
@@ -531,7 +541,6 @@ def check_muller(stores_config):
                         'hours': 'Zatvoreno'
                     })
             else:
-                # No Sunday in openingHours = closed
                 print(f"Müller: Sunday not found - closed")
                 results.append({
                     'chain': 'MÜLLER',
@@ -552,6 +561,7 @@ def check_muller(stores_config):
             })
     
     return results
+
 
 
 def check_plodine(stores_config):
