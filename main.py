@@ -795,6 +795,7 @@ def fetch_fresh_data(user='josip'):
 
     results = []
     results.extend(check_spar(stores_config))
+    results.extend(check_lidl(stores_config))
     results.extend(check_konzum(stores_config))
     results.extend(check_kaufland(stores_config))
     results.extend(check_studenac(stores_config))
