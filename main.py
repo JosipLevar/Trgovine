@@ -8,6 +8,10 @@ import os
 from pathlib import Path
 import re
 
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
+
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
 @app.route('/static/<path:filename>')
@@ -34,7 +38,7 @@ def static_version() -> str:
 
 STATIC_VERSION = static_version()
 
-cache = {'data': None, 'timestamp': None, 'date': None}
+cache = {'data': None, 'timestamp': None, 'date': None, 'user': None}
 cache_lock = Lock()
 CACHE_DURATION_HOURS = 6
 
@@ -316,7 +320,7 @@ def check_studenac(stores_config):
 
         try:
             print(f"Scraping Studenac HTML: {url}")
-            resp = requests.get(url, timeout=15)
+            resp = requests.get(url, timeout=15, headers=HEADERS)
             resp.raise_for_status()
 
             soup = BeautifulSoup(resp.text, 'html.parser')
@@ -390,10 +394,22 @@ def check_dm(stores_config):
         
         try:
             print(f"Checking DM {store_id}...")
-            url = f"https://store-data-service.services.dmtech.com/stores/{store_id}"
-            response = requests.get(url, timeout=15)
+            # Use search API with storeIds parameter
+            url = f"https://store-data-service.services.dmtech.com/stores?storeIds={store_id}"
+            response = requests.get(url, timeout=15, headers=HEADERS)
             response.raise_for_status()
-            store_data = response.json()
+            data = response.json()
+            
+            if not data.get('stores'):
+                results.append({
+                    'chain': 'DM',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Trgovina ne postoji'
+                })
+                continue
+            
+            store_data = data['stores'][0]
             
             # Check standard opening hours (weekDay: 0 ili 7 = Sunday)
             sunday_hours = None
@@ -444,6 +460,8 @@ def check_dm(stores_config):
                 
         except Exception as e:
             print(f"DM error for {store_id}: {e}")
+            import traceback
+            traceback.print_exc()
             results.append({
                 'chain': 'DM',
                 'name': name,
@@ -463,20 +481,20 @@ def check_muller(stores_config):
 
         try:
             print(f"Scraping Müller HTML: {url}")
-            resp = requests.get(url, timeout=15)
+            resp = requests.get(url, timeout=15, headers=HEADERS)
             resp.raise_for_status()
 
             soup = BeautifulSoup(resp.text, 'html.parser')
             
             # Find working hours table
             hours_found = False
-            for tag in soup.find_all(['div', 'table', 'ul']):
+            for tag in soup.find_all(['div', 'table', 'ul', 'li', 'p']):
                 text = tag.get_text()
-                if 'Nedjelja' in text or 'Subota' in text:
+                if 'Nedjelja' in text or 'nedjelja' in text:
                     # Check if Sunday is mentioned
-                    if 'Nedjelja' in text:
+                    if 'Nedjelja' in text or 'nedjelja' in text:
                         # Try to find hours after "Nedjelja"
-                        match = re.search(r'Nedjelja\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})', text)
+                        match = re.search(r'[Nn]edjelja\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})', text)
                         if match:
                             results.append({
                                 'chain': 'MÜLLER',
@@ -498,6 +516,8 @@ def check_muller(stores_config):
 
         except Exception as e:
             print(f"Müller scrape error for {url}: {e}")
+            import traceback
+            traceback.print_exc()
             results.append({
                 'chain': 'MÜLLER',
                 'name': name,
@@ -517,14 +537,14 @@ def check_plodine(stores_config):
 
         try:
             print(f"Scraping Plodine HTML: {url}")
-            resp = requests.get(url, timeout=15)
+            resp = requests.get(url, timeout=15, headers=HEADERS)
             resp.raise_for_status()
 
             soup = BeautifulSoup(resp.text, 'html.parser')
             
             # Find working hours section
             hours_found = False
-            for tag in soup.find_all(['div', 'table', 'ul', 'li']):
+            for tag in soup.find_all(['div', 'table', 'ul', 'li', 'p', 'span']):
                 text = tag.get_text()
                 if 'Nedjelja' in text or 'nedjelja' in text:
                     # Check if closed
@@ -557,11 +577,13 @@ def check_plodine(stores_config):
                     'chain': 'PLODINE',
                     'name': name,
                     'open': False,
-                    'hours': 'Nema informacija'
+                    'hours': 'Zatvoreno'
                 })
 
         except Exception as e:
             print(f"Plodine scrape error for {url}: {e}")
+            import traceback
+            traceback.print_exc()
             results.append({
                 'chain': 'PLODINE',
                 'name': name,
