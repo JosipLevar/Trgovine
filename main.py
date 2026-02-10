@@ -1,3 +1,9 @@
+from flask import send_from_directory
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory('static', filename)
+
 from flask import Flask, jsonify, render_template_string
 import requests
 from datetime import datetime, timedelta
