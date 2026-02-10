@@ -407,8 +407,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 <title>Radi li u nedjelju?</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;padding:15px}
-.container{max-width:600px;margin:0 auto;background:white;border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    background: #f3f4f6;            
+    min-height: 100vh;
+    padding: 15px;
+}
+
+.container {
+    max-width: 600px;
+    margin: 0 auto;
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
 h1{color:#333;font-size:1.8em;margin-bottom:5px}
 .subtitle{color:#666;font-size:0.9em;margin-bottom:20px}
 .date-banner{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:15px;border-radius:10px;text-align:center;font-size:1.1em;font-weight:bold;margin-bottom:15px}
@@ -433,9 +446,31 @@ h1{color:#333;font-size:1.8em;margin-bottom:5px}
 .spinner{border:3px solid #f3f3f3;border-top:3px solid #667eea;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:0 auto 15px}
 @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
 .error{background:#ffebee;color:#c62828;padding:15px;border-radius:8px;margin:20px 0}
-.refresh-btn{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;border:none;padding:12px 25px;border-radius:20px;cursor:pointer;font-size:1em;width:100%;margin-top:15px;font-weight:600;transition:transform 0.2s}
-.refresh-btn:active{transform:scale(0.98)}
-.footer{text-align:center;margin-top:20px;color:white;font-size:0.85em}
+.refresh-btn {
+    background: #2563eb; /* plava */
+    color: white;
+    border: none;
+    padding: 12px 25px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 1em;
+    width: 100%;
+    margin-top: 15px;
+    font-weight: 600;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+}
+
+.refresh-btn:active {
+    transform: translateY(1px);
+    box-shadow: 0 2px 6px rgba(37,99,235,0.35);
+}
+.footer {
+    text-align: center;
+    margin-top: 20px;
+    color: #6b7280;
+    font-size: 0.85em;
+}
 </style>
 </head>
 <body>
