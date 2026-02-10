@@ -76,12 +76,10 @@ NINA_STORES = {
         {'id': 200, 'name': 'Konzum Šibice'}
     ],
     'dm': [
-        {'storeId': 'K095', 'name': 'DM Zaprešić'},
-        {'storeId': 'K07G', 'name': 'Test DM'}
+        {'storeId': 'K095', 'name': 'DM Zaprešić'}
     ],
     'muller': [
-            {'storeId': '5089', 'name': 'Müller Zaprešić'},
-            {'storeId': '5056', 'name': 'TEST Muller'}
+            {'storeId': '5089', 'name': 'Müller Zaprešić'}
     ],
     'plodine': [
         {
