@@ -5,10 +5,10 @@ import json
 from threading import Lock
 from bs4 import BeautifulSoup
 
-app = Flask(__name__)
-
 import os
 from pathlib import Path
+
+app = Flask(__name__, static_folder='static', static_url_path='/static')
 
 BASE_DIR = Path(__file__).parent
 
