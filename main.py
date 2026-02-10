@@ -678,43 +678,31 @@ def check_lidl(stores_config):
             
             import re
             
-            # Try multiple regex patterns
-            patterns = [
-                r'<script[^>]*id=["\']__NUXT_DATA__["\'][^>]*>\s*(\[[\s\S]*?\])\s*</script>',
-                r'id=["\']__NUXT_DATA__["\'][^>]*>\s*(\[[\s\S]+?\])\s*</script>',
-                r'<script[^>]*id=__NUXT_DATA__[^>]*>\s*(\[[\s\S]*?\])\s*</script>',
-            ]
+            # Find ALL script tags with JSON arrays
+            script_tags = re.findall(r'<script[^>]*>([\s\S]*?)</script>', html_content)
             
-            payload = None
-            for pattern in patterns:
-                nuxt_match = re.search(pattern, html_content, re.IGNORECASE)
-                if nuxt_match:
-                    payload_str = nuxt_match.group(1).strip()
+            largest_payload = None
+            largest_size = 0
+            
+            for script_content in script_tags:
+                script_content = script_content.strip()
+                if script_content.startswith('['):
                     try:
-                        payload = json.loads(payload_str)
-                        print(f"Lidl: Found Nuxt payload with pattern")
-                        break
-                    except json.JSONDecodeError:
+                        temp_payload = json.loads(script_content)
+                        if isinstance(temp_payload, list):
+                            payload_size = len(temp_payload)
+                            
+                            if payload_size > largest_size:
+                                largest_size = payload_size
+                                largest_payload = temp_payload
+                    except:
                         continue
             
-            if not payload:
-                print(f"Lidl: Trying fallback - searching all script tags")
-                script_tags = re.findall(r'<script[^>]*>([\s\S]*?)</script>', html_content)
-                for script_content in script_tags:
-                    script_content = script_content.strip()
-                    if script_content.startswith('[') and '"openingHours"' in script_content:
-                        try:
-                            payload = json.loads(script_content)
-                            print(f"Lidl: Found payload in generic script tag")
-                            break
-                        except:
-                            continue
+            if not largest_payload:
+                raise Exception("No valid JSON payload found")
             
-            if not payload:
-                raise Exception("Nuxt payload not found in HTML")
-            
-            # DEBUG: Print payload structure
-            print(f"Lidl: Payload type: {type(payload)}, length: {len(payload) if isinstance(payload, list) else 'N/A'}")
+            payload = largest_payload
+            print(f"Lidl: Using payload with {largest_size} elements")
             
             # Search for openingHours in payload (Nuxt uses reference system)
             opening_hours_ref = None
@@ -729,22 +717,15 @@ def check_lidl(stores_config):
                     # Check if it's a direct object or a reference (integer)
                     if isinstance(opening_hours_ref, dict):
                         opening_hours_data = opening_hours_ref
-                        print(f"Lidl: openingHours is direct object")
                     elif isinstance(opening_hours_ref, int):
                         # It's a reference - follow it
                         if 0 <= opening_hours_ref < len(payload):
                             opening_hours_data = payload[opening_hours_ref]
                             print(f"Lidl: Followed reference to index {opening_hours_ref}")
-                        else:
-                            print(f"Lidl: Reference {opening_hours_ref} out of bounds")
                     break
             
             if not opening_hours_data:
-                print(f"Lidl: openingHours not found in payload")
                 raise Exception("No opening hours data in payload")
-            
-            print(f"Lidl: openingHours data type: {type(opening_hours_data)}")
-            print(f"Lidl: openingHours keys: {opening_hours_data.keys() if isinstance(opening_hours_data, dict) else 'not a dict'}")
             
             if opening_hours_data and isinstance(opening_hours_data, dict) and 'items' in opening_hours_data:
                 today = datetime.now()
@@ -754,15 +735,11 @@ def check_lidl(stores_config):
                 next_sunday = today + timedelta(days=days_until_sunday)
                 sunday_date_str = next_sunday.strftime('%Y-%m-%d')
                 
-                print(f"Lidl: Looking for Sunday date: {sunday_date_str}")
-                
                 items = opening_hours_data['items']
-                print(f"Lidl: items type: {type(items)}, length: {len(items) if isinstance(items, list) else 'N/A'}")
                 
                 # items might also be a reference
                 if isinstance(items, int):
                     items = payload[items]
-                    print(f"Lidl: Followed items reference to index")
                 
                 sunday_hours = None
                 for item in items:
@@ -772,7 +749,6 @@ def check_lidl(stores_config):
                     
                     if isinstance(item, dict) and item.get('date') == sunday_date_str:
                         sunday_hours = item
-                        print(f"Lidl: Found Sunday data!")
                         break
                 
                 if sunday_hours:
@@ -781,8 +757,6 @@ def check_lidl(stores_config):
                     # time_ranges might be a reference
                     if isinstance(time_ranges, int):
                         time_ranges = payload[time_ranges]
-                    
-                    print(f"Lidl: timeRanges: {time_ranges}")
                     
                     if isinstance(time_ranges, list) and len(time_ranges) > 0:
                         time_range = time_ranges[0]
@@ -841,6 +815,7 @@ def check_lidl(stores_config):
             })
     
     return results
+
 
 
 
