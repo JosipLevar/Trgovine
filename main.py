@@ -14,28 +14,31 @@ CACHE_DURATION_HOURS = 6
 MY_STORES = {
     'spar': [
         {'id': 38, 'name': 'SPAR Gospodska'},
-        {'id': 7, 'name': 'INTERSPAR King Cross'}
+        {'id': 7,  'name': 'INTERSPAR King Cross'}
     ],
     'konzum': [
-        {'id': 48, 'name': 'Konzum Bolnička'},
+        {'id': 48,  'name': 'Konzum Bolnička'},
         {'id': 216, 'name': 'Super Konzum Huzjanova'}
     ],
     'kaufland': [
         {'id': 'HR5630', 'name': 'Kaufland Jankomir'}
     ],
-    'lidl': [
-        {
-            'name': 'Lidl Huzjanova',
-            'url': 'https://www.lidl.hr/s/hr-HR/trazilica-trgovina/zagreb/huzjanova-ulica-4/'  #
-        }
-    ],
     'studenac': [
         {
             'name': 'Studenac Gospodska',
-            'url': 'https://www.studenac.hr/trgovine/1578/t1715-zagreb'  # OVDJE STAVI SVOJ TOČAN URL
+            'url': 'https://www.studenac.hr/trgovine/1578/t1715-zagreb'
+        },
+        {
+            'name': 'Studenac Dudovec 57',
+            'url': 'https://www.studenac.hr/trgovine/1507/t1568-zagreb'
+        },
+        {
+            'name': 'Studenac Bolnička 94',
+            'url': 'https://www.studenac.hr/trgovine/1543/t1687-zagreb'
         }
     ]
 }
+
 
 def get_next_sunday():
     today = datetime.now()
@@ -258,87 +261,6 @@ def check_kaufland():
             results.append({'chain': 'KAUFLAND', 'name': my_store['name'], 'open': False, 'hours': f'Greska: {str(e)[:30]}'})
     return results
 
-def check_lidl():
-    """
-    Scrapa HTML stranice konkretne Lidl trgovine i gleda nedjelju.
-    Logika:
-    - na stranici postoji blok 'Radno vrijeme'
-    - u tablici/ul postoji red s 'ned' ili 'nedjelja'
-    - ako u tom redu piše 'Zatvoreno' -> zatvoreno
-    - inače pokušamo izvući sate '08:00 - 21:00'
-    """
-    results = []
-
-    for my_store in MY_STORES.get('lidl', []):
-        name = my_store['name']
-        url = my_store['url']
-
-        try:
-            print(f"Scraping Lidl HTML: {url}")
-            resp = requests.get(url, timeout=15)
-            resp.raise_for_status()
-
-            soup = BeautifulSoup(resp.text, 'html.parser')
-
-            # Nađi sekciju s radnim vremenom – ovo je heuristika, možeš kasnije prilagoditi
-            text = soup.get_text(separator='\n', strip=True).lower()
-
-            # Probamo naći liniju s "ned" ili "nedjelja"
-            lines = text.split('\n')
-            sunday_line = None
-            for line in lines:
-                if 'nedjelja' in line or line.strip().startswith('ned'):
-                    sunday_line = line
-                    break
-
-            if not sunday_line:
-                results.append({
-                    'chain': 'LIDL',
-                    'name': name,
-                    'open': False,
-                    'hours': 'Nema informacija (HTML se promijenio)'
-                })
-                continue
-
-            if 'zatvoreno' in sunday_line:
-                results.append({
-                    'chain': 'LIDL',
-                    'name': name,
-                    'open': False,
-                    'hours': 'Zatvoreno'
-                })
-            else:
-                # Pokušaj izvući sate u formatu 08:00 - 21:00
-                import re
-                match = re.search(r'(\d{1,2}[:.]\d{2}).{0,5}(\d{1,2}[:.]\d{2})', sunday_line)
-                if match:
-                    from_time = match.group(1).replace('.', ':')
-                    to_time = match.group(2).replace('.', ':')
-                    results.append({
-                        'chain': 'LIDL',
-                        'name': name,
-                        'open': True,
-                        'hours': f'{from_time} - {to_time}'
-                    })
-                else:
-                    # Nema jasnog raspona, ali nije zatvoreno
-                    results.append({
-                        'chain': 'LIDL',
-                        'name': name,
-                        'open': True,
-                        'hours': 'Otvoreno (sate nisam uspio parsirati)'
-                    })
-
-        except Exception as e:
-            print(f"Lidl scrape error for {url}: {e}")
-            results.append({
-                'chain': 'LIDL',
-                'name': name,
-                'open': False,
-                'hours': f'Greška scraper: {str(e)[:40]}'
-            })
-
-    return results
 
 def check_studenac():
     """
@@ -433,8 +355,7 @@ def fetch_fresh_data():
     results.extend(check_spar())
     results.extend(check_konzum())
     results.extend(check_kaufland())
-    results.extend(check_lidl())       # NOVO
-    results.extend(check_studenac())   # NOVO
+    results.extend(check_studenac())   
 
     print(f"Total stores: {len(results)}")
 
