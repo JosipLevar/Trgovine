@@ -80,10 +80,8 @@ NINA_STORES = {
         {'storeId': 'K07G', 'name': 'Test DM'}
     ],
     'muller': [
-        {
             {'storeId': '5089', 'name': 'Müller Zaprešić'},
             {'storeId': '5056', 'name': 'TEST Muller'}
-        }
     ],
     'plodine': [
         {
