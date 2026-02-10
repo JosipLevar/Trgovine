@@ -402,55 +402,58 @@ def check_dm(stores_config):
             resp = requests.get(url, timeout=15, headers=HEADERS)
             resp.raise_for_status()
 
-            soup = BeautifulSoup(resp.text, 'html.parser')
+            # Get all text from page
+            html_text = resp.text.lower()
             
-            # Find all weekday elements
-            weekday_elements = soup.find_all('p', {'data-dmid': 'store-details-opening-days-weekday'})
-            
-            hours_found = False
-            
-            for weekday in weekday_elements:
-                day_text = weekday.get_text(strip=True).lower()
-                print(f"DM: Found day: '{day_text}'")
+            # Simple approach: search for "nedjelja" in entire HTML
+            if 'nedjelja' in html_text:
+                print(f"DM: Found 'nedjelja' in HTML")
                 
-                if 'nedjelja' in day_text:
-                    print(f"DM: Found Sunday!")
+                # Check if followed by "zatvoreno"
+                # Look for pattern: nedjelja...zatvoreno within reasonable distance
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                page_text = soup.get_text(separator=' ', strip=True).lower()
+                
+                # Find position of nedjelja
+                nedjelja_pos = page_text.find('nedjelja')
+                if nedjelja_pos != -1:
+                    # Check next 200 characters for zatvoreno or time pattern
+                    snippet = page_text[nedjelja_pos:nedjelja_pos + 200]
+                    print(f"DM: Text after 'nedjelja': {snippet[:100]}")
                     
-                    # Find parent container
-                    parent = weekday.find_parent('div', {'data-dmid': 'store-details-opening-days-weekday-container'})
-                    
-                    if parent:
-                        # Find time ranges in the same parent
-                        time_range = parent.find('div', {'data-dmid': 'store-details-opening-days-weekday-time-ranges'})
-                        
-                        if time_range:
-                            time_text = time_range.get_text(strip=True)
-                            print(f"DM: Time text: '{time_text}'")
-                            
-                            if 'zatvoreno' in time_text.lower():
-                                results.append({
-                                    'chain': 'DM',
-                                    'name': name,
-                                    'open': False,
-                                    'hours': 'Zatvoreno'
-                                })
-                                hours_found = True
-                                break
-                            else:
-                                # Parse hours
-                                match = re.search(r'(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})', time_text)
-                                if match:
-                                    results.append({
-                                        'chain': 'DM',
-                                        'name': name,
-                                        'open': True,
-                                        'hours': f'{match.group(1)} - {match.group(2)}'
-                                    })
-                                    hours_found = True
-                                    break
-            
-            if not hours_found:
-                print(f"DM: Could not parse Sunday hours")
+                    if 'zatvoreno' in snippet:
+                        results.append({
+                            'chain': 'DM',
+                            'name': name,
+                            'open': False,
+                            'hours': 'Zatvoreno'
+                        })
+                    else:
+                        # Try to find time pattern
+                        match = re.search(r'(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})', snippet)
+                        if match:
+                            results.append({
+                                'chain': 'DM',
+                                'name': name,
+                                'open': True,
+                                'hours': f'{match.group(1)} - {match.group(2)}'
+                            })
+                        else:
+                            results.append({
+                                'chain': 'DM',
+                                'name': name,
+                                'open': False,
+                                'hours': 'Nema podataka'
+                            })
+                else:
+                    results.append({
+                        'chain': 'DM',
+                        'name': name,
+                        'open': False,
+                        'hours': 'Nema podataka'
+                    })
+            else:
+                print(f"DM: 'nedjelja' NOT found in HTML")
                 results.append({
                     'chain': 'DM',
                     'name': name,
