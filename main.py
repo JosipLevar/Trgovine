@@ -404,17 +404,18 @@ def check_dm(stores_config):
 
             soup = BeautifulSoup(resp.text, 'html.parser')
             
-            # Find working hours - DM uses specific structure
-            hours_found = False
-            
             # Look for opening hours section
+            hours_found = False
+            explicitly_closed = False
+            
             for tag in soup.find_all(['div', 'table', 'ul', 'li', 'p', 'span']):
-                text = tag.get_text()
+                text = tag.get_text(separator=' ', strip=True)
                 
                 # Check if it contains days and Sunday
-                if ('Nedjelja' in text or 'nedjelja' in text) and ('Ponedjeljak' in text or 'ponedjeljak' in text):
-                    # This is likely the opening hours section
-                    # Check if Sunday has hours or is closed
+                if ('Nedjelja' in text or 'nedjelja' in text):
+                    print(f"DM: Found 'Nedjelja' in tag: {text[:100]}")  # Debug log
+                    
+                    # Check if explicitly closed
                     if 'Zatvoreno' in text or 'zatvoreno' in text:
                         results.append({
                             'chain': 'DM',
@@ -423,6 +424,7 @@ def check_dm(stores_config):
                             'hours': 'Zatvoreno'
                         })
                         hours_found = True
+                        explicitly_closed = True
                         break
                     else:
                         # Try to find hours pattern near "Nedjelja"
@@ -438,16 +440,17 @@ def check_dm(stores_config):
                             break
             
             if not hours_found:
-                # Default: closed on Sunday (most DM stores are)
+                # Scraping succeeded but no data found - NOT the same as closed!
+                print(f"DM: Scraping succeeded but no Sunday hours found in HTML")
                 results.append({
                     'chain': 'DM',
                     'name': name,
                     'open': False,
-                    'hours': 'Zatvoreno'
+                    'hours': 'Nema podataka'
                 })
 
         except Exception as e:
-            print(f"DM scrape error for {url}: {e}")
+            print(f"DM scrape ERROR for {url}: {e}")
             import traceback
             traceback.print_exc()
             results.append({
@@ -458,6 +461,7 @@ def check_dm(stores_config):
             })
     
     return results
+
 
 def check_muller(stores_config):
     """
