@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template_string, send_from_directory
+from flask import Flask, jsonify, render_template_string, send_from_directory, request
 import requests
 from datetime import datetime, timedelta
 import json
@@ -6,26 +6,20 @@ from threading import Lock
 from bs4 import BeautifulSoup
 import os
 from pathlib import Path
+import re
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
-# Custom static route handler
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     return send_from_directory('static', filename)
 
-# Cache busting version
 BASE_DIR = Path(__file__).parent
 
 def static_version() -> str:
-    """
-    Vrati timestamp zadnje izmjene bilo kojeg 'static' fajla.
-    Ako nema static direktorija, vrati '1'.
-    """
     static_dir = BASE_DIR / "static"
     if not static_dir.exists():
         return "1"
-
     latest = 0
     for root, _, files in os.walk(static_dir):
         for f in files:
@@ -36,7 +30,6 @@ def static_version() -> str:
                     latest = mtime
             except OSError:
                 continue
-
     return str(latest or 1)
 
 STATIC_VERSION = static_version()
@@ -45,7 +38,7 @@ cache = {'data': None, 'timestamp': None, 'date': None}
 cache_lock = Lock()
 CACHE_DURATION_HOURS = 6
 
-MY_STORES = {
+JOSIP_STORES = {
     'spar': [
         {'id': 38, 'name': 'SPAR Gospodska'},
         {'id': 7,  'name': 'SPAR King Cross'},
@@ -74,6 +67,27 @@ MY_STORES = {
     ]
 }
 
+NINA_STORES = {
+    'konzum': [
+        {'id': 200, 'name': 'Konzum Šibice'}
+    ],
+    'dm': [
+        {'storeId': 'K095', 'name': 'DM Zaprešić'}
+    ],
+    'muller': [
+        {
+            'name': 'Müller Zaprešić',
+            'url': 'https://www.mueller.hr/hr/poslovnice/zapresic-fmz/'
+        }
+    ],
+    'plodine': [
+        {
+            'name': 'Plodine Zaprešić',
+            'url': 'https://www.plodine.hr/supermarketi/90/hipermarket-zapresic?select=90'
+        }
+    ]
+}
+
 
 def get_next_sunday():
     today = datetime.now()
@@ -94,12 +108,11 @@ def is_cache_valid():
         return False
     return True
 
-def check_spar():
-    """Provjeri SPAR trgovine (Gospodska 38, King Cross 7) za sljedeću nedjelju."""
+def check_spar(stores_config):
     results = []
-
-    # Fallback dok ne dobijemo API response
-    for my_store in MY_STORES['spar']:
+    spar_stores = stores_config.get('spar', [])
+    
+    for my_store in spar_stores:
         results.append({
             'chain': 'SPAR',
             'name': my_store['name'],
@@ -116,9 +129,9 @@ def check_spar():
         print(f"Spar API returned {len(all_stores)} stores")
 
         next_sunday = get_next_sunday().date()
-        results = []  # reset nakon uspješnog API poziva
+        results = []
 
-        for my_store in MY_STORES['spar']:
+        for my_store in spar_stores:
             my_id = str(my_store['id'])
             found = False
 
@@ -128,11 +141,9 @@ def check_spar():
                     continue
 
                 found = True
-                # default: radi po standardnom nedjeljnom radnom vremenu
                 sunday_from = None
                 sunday_to = None
 
-                # 1) standardni raspored (shopHours → openingHours)
                 for item in store.get('shopHours', []):
                     oh = item.get('openingHours', {})
                     if oh.get('dayType') == 'nedjelja':
@@ -143,7 +154,6 @@ def check_spar():
                             sunday_to = (to1['hourOfDay'], to1['minute'])
                         break
 
-                # 2) specialShopHours – override za konkretne datume
                 closed_override = False
                 for special in store.get('specialShopHours', []):
                     oh = special.get('openingHours', {})
@@ -151,11 +161,10 @@ def check_spar():
                     if not day:
                         continue
 
-                    # dayType je cijeli datum objekt: {year, month, dayOfMonth,...}
                     try:
                         special_date = datetime(
                             day['year'],
-                            day['month'] + 1,      # Sparov month je 0-based
+                            day['month'] + 1,
                             day['dayOfMonth']
                         ).date()
                     except Exception as e:
@@ -165,16 +174,13 @@ def check_spar():
                     if special_date != next_sunday:
                         continue
 
-                    # ako je override za baš tu nedjelju
                     from1 = oh.get('from1')
                     to1 = oh.get('to1')
                     if from1 is None and to1 is None:
-                        # potpuno zatvoreno
                         closed_override = True
                         sunday_from = None
                         sunday_to = None
                     elif from1 and to1:
-                        # posebno radno vrijeme
                         sunday_from = (from1['hourOfDay'], from1['minute'])
                         sunday_to = (to1['hourOfDay'], to1['minute'])
                     break
@@ -189,7 +195,6 @@ def check_spar():
                         'hours': f"{from_h:02d}:{from_m:02d} - {to_h:02d}:{to_m:02d}"
                     })
                 else:
-                    # ili nema nedjeljnog radnog vremena, ili je special override zatvorio dućan
                     status = 'Zatvoreno' if closed_override or sunday_from is None else 'Nema podataka'
                     results.append({
                         'chain': 'SPAR',
@@ -197,8 +202,7 @@ def check_spar():
                         'open': False,
                         'hours': status
                     })
-
-                break  # našli smo taj store, nema smisla dalje ići po all_stores
+                break
 
             if not found:
                 results.append({
@@ -211,7 +215,7 @@ def check_spar():
     except Exception as e:
         print(f"Spar error: {e}")
         results = []
-        for my_store in MY_STORES['spar']:
+        for my_store in spar_stores:
             results.append({
                 'chain': 'SPAR',
                 'name': my_store['name'],
@@ -222,26 +226,29 @@ def check_spar():
     return results
 
 
-def check_konzum():
+def check_konzum(stores_config):
     results = []
-    for my_store in MY_STORES['konzum']:
+    konzum_stores = stores_config.get('konzum', [])
+    
+    for my_store in konzum_stores:
         results.append({'chain': 'KONZUM', 'name': my_store['name'], 'open': False, 'hours': 'Provjeravam...'})
+    
     try:
         print("Checking Konzum...")
         url = "https://trgovine.konzum.hr/api/locations/"
         response = requests.get(url, timeout=15)
         response.raise_for_status()
         data = response.json()
-        print(f"Konzum API response type: {type(data)}")
+        
         if isinstance(data, dict):
             all_stores = data.get('locations', []) or data.get('data', []) or []
         elif isinstance(data, list):
             all_stores = data
         else:
             all_stores = []
-        print(f"Konzum stores found: {len(all_stores)}")
+        
         results = []
-        for my_store in MY_STORES['konzum']:
+        for my_store in konzum_stores:
             found = False
             for store in all_stores:
                 if store.get('id') == my_store['id']:
@@ -267,13 +274,15 @@ def check_konzum():
     except Exception as e:
         print(f"Konzum error: {e}")
         results = []
-        for my_store in MY_STORES['konzum']:
+        for my_store in konzum_stores:
             results.append({'chain': 'KONZUM', 'name': my_store['name'], 'open': False, 'hours': f'Greska: {str(e)[:30]}'})
     return results
 
-def check_kaufland():
+def check_kaufland(stores_config):
     results = []
-    for my_store in MY_STORES['kaufland']:
+    kaufland_stores = stores_config.get('kaufland', [])
+    
+    for my_store in kaufland_stores:
         try:
             print(f"Checking Kaufland {my_store['id']}...")
             url = f"https://www.kaufland.hr/.klstorebygeo.storeName={my_store['id']}.json"
@@ -297,17 +306,11 @@ def check_kaufland():
     return results
 
 
-def check_studenac():
-    """
-    Scrapa HTML stranice konkretne Studenac trgovine.
-    Logika:
-    - postoji lista radnih dana s 'Nedjelja' i <strong>Zatvoreno</strong> ili satima
-    - ako nađemo 'Nedjelja' + 'Zatvoreno' -> zatvoreno
-    - ako nađemo 'Nedjelja' + '07:00-21:00' -> otvoreno
-    """
+def check_studenac(stores_config):
     results = []
+    studenac_stores = stores_config.get('studenac', [])
 
-    for my_store in MY_STORES.get('studenac', []):
+    for my_store in studenac_stores:
         name = my_store['name']
         url = my_store['url']
 
@@ -317,12 +320,8 @@ def check_studenac():
             resp.raise_for_status()
 
             soup = BeautifulSoup(resp.text, 'html.parser')
-
-            # Nađi blok radnog vremena
-            # U HTML-u koji si slao bio je <div class="marketsingleworkhours"> s li elementima
             work_hours_div = soup.find('div', class_='marketsingleworkhours')
             if not work_hours_div:
-                # fallback: traži bilo koji li koji sadrži "Nedjelja"
                 lis = soup.find_all('li')
             else:
                 lis = work_hours_div.find_all('li')
@@ -339,7 +338,7 @@ def check_studenac():
                     'chain': 'STUDENAC',
                     'name': name,
                     'open': False,
-                    'hours': 'Nema informacija (HTML se promijenio)'
+                    'hours': 'Nema informacija'
                 })
                 continue
 
@@ -351,8 +350,6 @@ def check_studenac():
                     'hours': 'Zatvoreno'
                 })
             else:
-                # Očekujemo nešto poput "Nedjelja 07:00-21:00"
-                import re
                 match = re.search(r'(\d{1,2}[:.]\d{2})\s*[-–]\s*(\d{1,2}[:.]\d{2})', sunday_text)
                 if match:
                     from_time = match.group(1).replace('.', ':')
@@ -368,7 +365,7 @@ def check_studenac():
                         'chain': 'STUDENAC',
                         'name': name,
                         'open': True,
-                        'hours': 'Otvoreno (sate nisam uspio parsirati)'
+                        'hours': 'Otvoreno'
                     })
 
         except Exception as e:
@@ -377,20 +374,217 @@ def check_studenac():
                 'chain': 'STUDENAC',
                 'name': name,
                 'open': False,
-                'hours': f'Greška scraper: {str(e)[:40]}'
+                'hours': f'Greška: {str(e)[:40]}'
             })
 
     return results
 
-def fetch_fresh_data():
-    print("=== FETCHING FRESH DATA ===")
+def check_dm(stores_config):
+    results = []
+    dm_stores = stores_config.get('dm', [])
+    next_sunday = get_next_sunday().date()
+
+    for my_store in dm_stores:
+        store_id = my_store['storeId']
+        name = my_store['name']
+        
+        try:
+            print(f"Checking DM {store_id}...")
+            url = f"https://store-data-service.services.dmtech.com/stores/{store_id}"
+            response = requests.get(url, timeout=15)
+            response.raise_for_status()
+            store_data = response.json()
+            
+            # Check standard opening hours (weekDay: 0 ili 7 = Sunday)
+            sunday_hours = None
+            for hours in store_data.get('openingHours', []):
+                if hours.get('weekDay') in [0, 7]:
+                    time_ranges = hours.get('timeRanges', [])
+                    if time_ranges:
+                        sunday_hours = time_ranges[0]
+                    break
+            
+            # Check extraOpeningDays for this specific Sunday
+            for extra_day in store_data.get('extraOpeningDays', []):
+                try:
+                    extra_date = datetime.strptime(extra_day['date'], '%Y-%m-%d').date()
+                    if extra_date == next_sunday:
+                        time_ranges = extra_day.get('timeRanges', [])
+                        if time_ranges:
+                            sunday_hours = time_ranges[0]
+                        break
+                except:
+                    continue
+            
+            # Check extraClosingDates
+            is_closed = False
+            for closing_date in store_data.get('extraClosingDates', []):
+                try:
+                    close_date = datetime.strptime(closing_date['date'], '%Y-%m-%d').date()
+                    if close_date == next_sunday:
+                        is_closed = True
+                        break
+                except:
+                    continue
+            
+            if is_closed or not sunday_hours:
+                results.append({
+                    'chain': 'DM',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Zatvoreno'
+                })
+            else:
+                results.append({
+                    'chain': 'DM',
+                    'name': name,
+                    'open': True,
+                    'hours': f"{sunday_hours['opening']} - {sunday_hours['closing']}"
+                })
+                
+        except Exception as e:
+            print(f"DM error for {store_id}: {e}")
+            results.append({
+                'chain': 'DM',
+                'name': name,
+                'open': False,
+                'hours': f'Greška: {str(e)[:30]}'
+            })
+    
+    return results
+
+def check_muller(stores_config):
+    results = []
+    muller_stores = stores_config.get('muller', [])
+
+    for my_store in muller_stores:
+        name = my_store['name']
+        url = my_store['url']
+
+        try:
+            print(f"Scraping Müller HTML: {url}")
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            
+            # Find working hours table
+            hours_found = False
+            for tag in soup.find_all(['div', 'table', 'ul']):
+                text = tag.get_text()
+                if 'Nedjelja' in text or 'Subota' in text:
+                    # Check if Sunday is mentioned
+                    if 'Nedjelja' in text:
+                        # Try to find hours after "Nedjelja"
+                        match = re.search(r'Nedjelja\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})', text)
+                        if match:
+                            results.append({
+                                'chain': 'MÜLLER',
+                                'name': name,
+                                'open': True,
+                                'hours': f'{match.group(1)} - {match.group(2)}'
+                            })
+                            hours_found = True
+                            break
+            
+            if not hours_found:
+                # Default: closed on Sunday
+                results.append({
+                    'chain': 'MÜLLER',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Zatvoreno'
+                })
+
+        except Exception as e:
+            print(f"Müller scrape error for {url}: {e}")
+            results.append({
+                'chain': 'MÜLLER',
+                'name': name,
+                'open': False,
+                'hours': f'Greška: {str(e)[:40]}'
+            })
+
+    return results
+
+def check_plodine(stores_config):
+    results = []
+    plodine_stores = stores_config.get('plodine', [])
+
+    for my_store in plodine_stores:
+        name = my_store['name']
+        url = my_store['url']
+
+        try:
+            print(f"Scraping Plodine HTML: {url}")
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            
+            # Find working hours section
+            hours_found = False
+            for tag in soup.find_all(['div', 'table', 'ul', 'li']):
+                text = tag.get_text()
+                if 'Nedjelja' in text or 'nedjelja' in text:
+                    # Check if closed
+                    if 'Zatvoreno' in text or 'zatvoreno' in text:
+                        results.append({
+                            'chain': 'PLODINE',
+                            'name': name,
+                            'open': False,
+                            'hours': 'Zatvoreno'
+                        })
+                        hours_found = True
+                        break
+                    else:
+                        # Try to find hours
+                        match = re.search(r'(\d{1,2}[:.]\d{2})\s*[-–]\s*(\d{1,2}[:.]\d{2})', text)
+                        if match:
+                            from_time = match.group(1).replace('.', ':')
+                            to_time = match.group(2).replace('.', ':')
+                            results.append({
+                                'chain': 'PLODINE',
+                                'name': name,
+                                'open': True,
+                                'hours': f'{from_time} - {to_time}'
+                            })
+                            hours_found = True
+                            break
+            
+            if not hours_found:
+                results.append({
+                    'chain': 'PLODINE',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Nema informacija'
+                })
+
+        except Exception as e:
+            print(f"Plodine scrape error for {url}: {e}")
+            results.append({
+                'chain': 'PLODINE',
+                'name': name,
+                'open': False,
+                'hours': f'Greška: {str(e)[:40]}'
+            })
+
+    return results
+
+def fetch_fresh_data(user='josip'):
+    print(f"=== FETCHING FRESH DATA FOR {user.upper()} ===")
     next_sunday = get_next_sunday()
+    
+    stores_config = JOSIP_STORES if user == 'josip' else NINA_STORES
 
     results = []
-    results.extend(check_spar())
-    results.extend(check_konzum())
-    results.extend(check_kaufland())
-    results.extend(check_studenac())   
+    results.extend(check_spar(stores_config))
+    results.extend(check_konzum(stores_config))
+    results.extend(check_kaufland(stores_config))
+    results.extend(check_studenac(stores_config))
+    results.extend(check_dm(stores_config))
+    results.extend(check_muller(stores_config))
+    results.extend(check_plodine(stores_config))
 
     print(f"Total stores: {len(results)}")
 
@@ -421,7 +615,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 *{margin:0;padding:0;box-sizing:border-box}
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-    background: #f3f4f6;            
+    background: #f3f4f6;
     min-height: 100vh;
     padding: 15px;
 }
@@ -436,6 +630,10 @@ body {
 }
 h1{color:#333;font-size:1.8em;margin-bottom:5px}
 .subtitle{color:#666;font-size:0.9em;margin-bottom:20px}
+.user-toggle{display:flex;gap:10px;margin-bottom:20px;border-radius:8px;background:#f0f0f0;padding:4px}
+.toggle-btn{flex:1;padding:10px;border:none;background:transparent;border-radius:6px;cursor:pointer;font-weight:600;transition:all 0.2s}
+.toggle-btn.active{background:#2563eb;color:white;box-shadow:0 2px 8px rgba(37,99,235,0.3)}
+.toggle-btn:not(.active){color:#666}
 .date-banner{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:15px;border-radius:10px;text-align:center;font-size:1.1em;font-weight:bold;margin-bottom:15px}
 .cache-info{text-align:center;font-size:0.8em;color:#999;margin-bottom:15px}
 .cache-info.cached{color:#4CAF50}
@@ -489,6 +687,10 @@ h1{color:#333;font-size:1.8em;margin-bottom:5px}
 <div class="container">
 <h1>🛒 Radi li u nedjelju?</h1>
 <p class="subtitle">Moje trgovine u Zagrebu</p>
+<div class="user-toggle">
+  <button class="toggle-btn" data-user="josip">Josip</button>
+  <button class="toggle-btn" data-user="nina">Nina</button>
+</div>
 <div id="results"><div class="loading"><div class="spinner"></div>Učitavam podatke...</div></div>
 <button class="refresh-btn" onclick="loadData()">🔄 Osvježi podatke</button>
 </div>
@@ -503,20 +705,29 @@ def index():
 
 @app.route('/api/check')
 def check_all():
+    user = request.args.get('user', 'josip')
+    print(f"=== API CHECK CALLED for {user} ===")
+    
     try:
         with cache_lock:
-            if is_cache_valid():
+            if is_cache_valid() and cache.get('user') == user:
+                print("Cache is valid, returning cached data")
                 result = cache['data'].copy()
                 result['cached'] = True
                 return jsonify(result)
             else:
-                data = fetch_fresh_data()
+                print("Cache invalid or different user, fetching fresh data...")
+                data = fetch_fresh_data(user)
                 cache['data'] = data
                 cache['timestamp'] = datetime.now()
                 cache['date'] = get_next_sunday().date()
+                cache['user'] = user
+                print("Fresh data fetched successfully")
                 return jsonify(data)
     except Exception as e:
         print(f"API check error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
