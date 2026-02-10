@@ -81,8 +81,7 @@ NINA_STORES = {
     ],
     'muller': [
         {
-            'name': 'Müller Zaprešić'
-            # No URL - using hardcoded "Closed on Sunday"
+            {'storeId': '5089', 'name': 'Müller Zaprešić'}
         }
     ],
     'plodine': [
@@ -470,25 +469,91 @@ def check_dm(stores_config):
 
 
 def check_muller(stores_config):
-    """
-    Müller nema pojedinačne URL-ove za trgovine dostupne za scraping.
-    Default: sve trgovine zatvorene nedeljom (što je standardna praksa).
-    """
     results = []
     muller_stores = stores_config.get('muller', [])
 
     for my_store in muller_stores:
+        store_id = my_store['storeId']
         name = my_store['name']
         
-        # Müller u Hrvatskoj standardno ne radi nedeljom
-        results.append({
-            'chain': 'MÜLLER',
-            'name': name,
-            'open': False,
-            'hours': 'Zatvoreno'
-        })
-
+        try:
+            print(f"Checking Müller {store_id} via GraphQL API...")
+            
+            # GraphQL persisted query endpoint
+            url = "https://backend.prod.ecom.mueller.hr/"
+            params = {
+                'operatingChain': 'B2C_HR_Store',
+                'operationName': 'GetStoreById',
+                'variables': json.dumps({
+                    'storeId': store_id,
+                    'country': 'HR'
+                }),
+                'extensions': json.dumps({
+                    'persistedQuery': {
+                        'version': 1,
+                        'sha256Hash': '194353aba88b0d1d9c6a83a8860b1fb99f509edf26b21b77b09e950120cbb9db'
+                    }
+                })
+            }
+            
+            response = requests.get(url, params=params, timeout=15, headers=HEADERS)
+            response.raise_for_status()
+            data = response.json()
+            
+            print(f"Müller API: Got response for {store_id}")
+            
+            store_data = data.get('data', {}).get('getStoreById', {})
+            opening_hours = store_data.get('openingHours', [])
+            
+            # Find Sunday hours
+            sunday_hours = None
+            for hours in opening_hours:
+                if hours.get('day') == 'sunday':
+                    sunday_hours = hours
+                    break
+            
+            if sunday_hours:
+                opening = sunday_hours.get('openingTime')
+                closing = sunday_hours.get('closingTime')
+                
+                if opening and closing:
+                    print(f"Müller: Found Sunday hours: {opening} - {closing}")
+                    results.append({
+                        'chain': 'MÜLLER',
+                        'name': name,
+                        'open': True,
+                        'hours': f'{opening} - {closing}'
+                    })
+                else:
+                    results.append({
+                        'chain': 'MÜLLER',
+                        'name': name,
+                        'open': False,
+                        'hours': 'Zatvoreno'
+                    })
+            else:
+                # No Sunday in openingHours = closed
+                print(f"Müller: Sunday not found - closed")
+                results.append({
+                    'chain': 'MÜLLER',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Zatvoreno'
+                })
+                
+        except Exception as e:
+            print(f"Müller API error for {store_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            results.append({
+                'chain': 'MÜLLER',
+                'name': name,
+                'open': False,
+                'hours': f'Greška: {str(e)[:30]}'
+            })
+    
     return results
+
 
 def check_plodine(stores_config):
     results = []
