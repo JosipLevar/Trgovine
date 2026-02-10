@@ -404,44 +404,53 @@ def check_dm(stores_config):
 
             soup = BeautifulSoup(resp.text, 'html.parser')
             
-            # Look for opening hours section
-            hours_found = False
-            explicitly_closed = False
+            # Find all weekday elements
+            weekday_elements = soup.find_all('p', {'data-dmid': 'store-details-opening-days-weekday'})
             
-            for tag in soup.find_all(['div', 'table', 'ul', 'li', 'p', 'span']):
-                text = tag.get_text(separator=' ', strip=True)
+            hours_found = False
+            
+            for weekday in weekday_elements:
+                day_text = weekday.get_text(strip=True).lower()
+                print(f"DM: Found day: '{day_text}'")
                 
-                # Check if it contains days and Sunday
-                if ('Nedjelja' in text or 'nedjelja' in text):
-                    print(f"DM: Found 'Nedjelja' in tag: {text[:100]}")  # Debug log
+                if 'nedjelja' in day_text:
+                    print(f"DM: Found Sunday!")
                     
-                    # Check if explicitly closed
-                    if 'Zatvoreno' in text or 'zatvoreno' in text:
-                        results.append({
-                            'chain': 'DM',
-                            'name': name,
-                            'open': False,
-                            'hours': 'Zatvoreno'
-                        })
-                        hours_found = True
-                        explicitly_closed = True
-                        break
-                    else:
-                        # Try to find hours pattern near "Nedjelja"
-                        match = re.search(r'[Nn]edjelja[^\d]*(\d{1,2}:\d{2})[^\d]*(\d{1,2}:\d{2})', text)
-                        if match:
-                            results.append({
-                                'chain': 'DM',
-                                'name': name,
-                                'open': True,
-                                'hours': f'{match.group(1)} - {match.group(2)}'
-                            })
-                            hours_found = True
-                            break
+                    # Find parent container
+                    parent = weekday.find_parent('div', {'data-dmid': 'store-details-opening-days-weekday-container'})
+                    
+                    if parent:
+                        # Find time ranges in the same parent
+                        time_range = parent.find('div', {'data-dmid': 'store-details-opening-days-weekday-time-ranges'})
+                        
+                        if time_range:
+                            time_text = time_range.get_text(strip=True)
+                            print(f"DM: Time text: '{time_text}'")
+                            
+                            if 'zatvoreno' in time_text.lower():
+                                results.append({
+                                    'chain': 'DM',
+                                    'name': name,
+                                    'open': False,
+                                    'hours': 'Zatvoreno'
+                                })
+                                hours_found = True
+                                break
+                            else:
+                                # Parse hours
+                                match = re.search(r'(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})', time_text)
+                                if match:
+                                    results.append({
+                                        'chain': 'DM',
+                                        'name': name,
+                                        'open': True,
+                                        'hours': f'{match.group(1)} - {match.group(2)}'
+                                    })
+                                    hours_found = True
+                                    break
             
             if not hours_found:
-                # Scraping succeeded but no data found - NOT the same as closed!
-                print(f"DM: Scraping succeeded but no Sunday hours found in HTML")
+                print(f"DM: Could not parse Sunday hours")
                 results.append({
                     'chain': 'DM',
                     'name': name,
@@ -461,6 +470,7 @@ def check_dm(stores_config):
             })
     
     return results
+
 
 
 def check_muller(stores_config):
