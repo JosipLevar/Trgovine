@@ -48,6 +48,9 @@ JOSIP_STORES = {
         {'id': 7,  'name': 'SPAR King Cross'},
         {'id': 2,  'name': 'City Center West'}
     ],
+    'lidl': [
+    {'url': 'https://www.lidl.hr/s/hr-HR/trazilica-trgovina/zagreb/huzjanova-ulica-4', 'name': 'Lidl Huzjanova'}
+    ],
     'konzum': [
         {'id': 48,  'name': 'Konzum Bolnička'},
         {'id': 216, 'name': 'Konzum Huzjanova'}
@@ -72,6 +75,9 @@ JOSIP_STORES = {
 }
 
 NINA_STORES = {
+    'lidl': [
+    {'url': 'https://www.lidl.hr/s/hr-HR/trazilica-trgovina/zapresic/ulica-kardinala-alojzija-stepinca-64', 'name': 'Lidl Zaprešić'}
+    ],
     'konzum': [
         {'id': 200, 'name': 'Konzum Šibice'}
     ],
@@ -654,6 +660,132 @@ def check_plodine(stores_config):
             })
 
     return results
+
+def check_lidl(stores_config):
+    results = []
+    lidl_stores = stores_config.get('lidl', [])
+
+    for my_store in lidl_stores:
+        store_url = my_store['url']
+        name = my_store['name']
+        
+        try:
+            print(f"Checking Lidl {name} via HTML parsing...")
+            
+            response = requests.get(store_url, headers=HEADERS, timeout=15)
+            response.raise_for_status()
+            html_content = response.text
+            
+            # Try to extract JSON from <script id="__NUXT_DATA__">
+            import re
+            
+            # Method 1: Look for __NUXT_DATA__ script tag
+            nuxt_data_match = re.search(r'<script[^>]*id="__NUXT_DATA__"[^>]*type="application/json"[^>]*>(.*?)</script>', html_content, re.DOTALL)
+            
+            if not nuxt_data_match:
+                # Method 2: Look for window.__NUXT__
+                nuxt_data_match = re.search(r'window\.__NUXT__\s*=\s*({.*?})\s*</script>', html_content, re.DOTALL)
+            
+            if nuxt_data_match:
+                payload_str = nuxt_data_match.group(1)
+                payload = json.loads(payload_str)
+                
+                print(f"Lidl: Found Nuxt payload for {name}")
+                
+                # Navigate through the complex payload structure
+                # The payload is an array, need to find openingHours key
+                opening_hours_data = None
+                
+                # Recursive search for openingHours
+                def find_key(data, target_key):
+                    if isinstance(data, dict):
+                        if target_key in data:
+                            return data[target_key]
+                        for value in data.values():
+                            result = find_key(value, target_key)
+                            if result is not None:
+                                return result
+                    elif isinstance(data, list):
+                        for item in data:
+                            result = find_key(item, target_key)
+                            if result is not None:
+                                return result
+                    return None
+                
+                opening_hours_data = find_key(payload, 'openingHours')
+                
+                if opening_hours_data and 'items' in opening_hours_data:
+                    # Find Sunday in items
+                    from datetime import datetime, timedelta
+                    
+                    # Get next Sunday
+                    today = datetime.now()
+                    days_until_sunday = (6 - today.weekday()) % 7
+                    if days_until_sunday == 0:
+                        days_until_sunday = 7  # If today is Sunday, get next Sunday
+                    next_sunday = today + timedelta(days=days_until_sunday)
+                    sunday_date_str = next_sunday.strftime('%Y-%m-%d')
+                    
+                    sunday_hours = None
+                    for item in opening_hours_data['items']:
+                        if item.get('date') == sunday_date_str:
+                            sunday_hours = item
+                            break
+                    
+                    if sunday_hours:
+                        time_ranges = sunday_hours.get('timeRanges', [])
+                        
+                        if len(time_ranges) > 0:
+                            # Open on Sunday
+                            from_time = time_ranges[0].get('from', '')
+                            to_time = time_ranges[0].get('to', '')
+                            
+                            # Extract HH:MM format
+                            from_hm = from_time.split('T')[1][:5] if 'T' in from_time else ''
+                            to_hm = to_time.split('T')[1][:5] if 'T' in to_time else ''
+                            
+                            print(f"Lidl {name}: Sunday hours {from_hm} - {to_hm}")
+                            results.append({
+                                'chain': 'LIDL',
+                                'name': name,
+                                'open': True,
+                                'hours': f'{from_hm} - {to_hm}'
+                            })
+                        else:
+                            # Closed on Sunday
+                            print(f"Lidl {name}: Closed on Sunday")
+                            results.append({
+                                'chain': 'LIDL',
+                                'name': name,
+                                'open': False,
+                                'hours': 'Zatvoreno'
+                            })
+                    else:
+                        print(f"Lidl {name}: Sunday data not found")
+                        results.append({
+                            'chain': 'LIDL',
+                            'name': name,
+                            'open': False,
+                            'hours': 'Podaci nedostupni'
+                        })
+                else:
+                    raise Exception("No opening hours data in payload")
+            else:
+                raise Exception("Nuxt payload not found in HTML")
+                
+        except Exception as e:
+            print(f"Lidl error for {name}: {e}")
+            import traceback
+            traceback.print_exc()
+            results.append({
+                'chain': 'LIDL',
+                'name': name,
+                'open': False,
+                'hours': f'Greška: {str(e)[:30]}'
+            })
+    
+    return results
+
 
 def fetch_fresh_data(user='josip'):
     print(f"=== FETCHING FRESH DATA FOR {user.upper()} ===")
