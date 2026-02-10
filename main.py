@@ -676,24 +676,48 @@ def check_lidl(stores_config):
             response.raise_for_status()
             html_content = response.text
             
-            # Extract JSON payload from __NUXT_DATA__ script
             import re
             
-            # Look for <script id="__NUXT_DATA__" type="application/json">
-            nuxt_match = re.search(
-                r'<script[^>]*id="__NUXT_DATA__"[^>]*type="application/json"[^>]*>\s*(\[[\s\S]*?\])\s*</script>',
-                html_content
-            )
+            # Try multiple regex patterns
+            patterns = [
+                # Pattern 1: Standard __NUXT_DATA__
+                r'<script[^>]*id=["\']__NUXT_DATA__["\'][^>]*>\s*(\[[\s\S]*?\])\s*</script>',
+                # Pattern 2: More flexible with any attributes
+                r'id=["\']__NUXT_DATA__["\'][^>]*>\s*(\[[\s\S]+?\])\s*</script>',
+                # Pattern 3: Without id attribute quotes
+                r'<script[^>]*id=__NUXT_DATA__[^>]*>\s*(\[[\s\S]*?\])\s*</script>',
+            ]
             
-            if not nuxt_match:
+            payload = None
+            for pattern in patterns:
+                nuxt_match = re.search(pattern, html_content, re.IGNORECASE)
+                if nuxt_match:
+                    payload_str = nuxt_match.group(1).strip()
+                    try:
+                        payload = json.loads(payload_str)
+                        print(f"Lidl: Found Nuxt payload with pattern")
+                        break
+                    except json.JSONDecodeError:
+                        continue
+            
+            if not payload:
+                # Fallback: Search for any large JSON array in script tags
+                print(f"Lidl: Trying fallback - searching all script tags")
+                script_tags = re.findall(r'<script[^>]*>([\s\S]*?)</script>', html_content)
+                for script_content in script_tags:
+                    script_content = script_content.strip()
+                    if script_content.startswith('[') and '"openingHours"' in script_content:
+                        try:
+                            payload = json.loads(script_content)
+                            print(f"Lidl: Found payload in generic script tag")
+                            break
+                        except:
+                            continue
+            
+            if not payload:
                 raise Exception("Nuxt payload not found in HTML")
             
-            payload_str = nuxt_match.group(1).strip()
-            payload = json.loads(payload_str)
-            
-            print(f"Lidl: Found Nuxt payload for {name}")
-            
-            # Recursive search for openingHours in payload array/dict
+            # Recursive search for openingHours
             def find_key(data, target_key):
                 if isinstance(data, dict):
                     if target_key in data:
@@ -712,7 +736,6 @@ def check_lidl(stores_config):
             opening_hours_data = find_key(payload, 'openingHours')
             
             if opening_hours_data and 'items' in opening_hours_data:
-                # Get next Sunday
                 today = datetime.now()
                 days_until_sunday = (6 - today.weekday()) % 7
                 if days_until_sunday == 0:
@@ -762,16 +785,10 @@ def check_lidl(stores_config):
             else:
                 raise Exception("No opening hours data in payload")
                 
-        except json.JSONDecodeError as e:
-            print(f"Lidl JSON parse error for {name}: {e}")
-            results.append({
-                'chain': 'LIDL',
-                'name': name,
-                'open': False,
-                'hours': f'JSON greška'
-            })
         except Exception as e:
             print(f"Lidl error for {name}: {e}")
+            import traceback
+            traceback.print_exc()
             results.append({
                 'chain': 'LIDL',
                 'name': name,
