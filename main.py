@@ -79,7 +79,6 @@ NINA_STORES = {
         {
             'storeId': 'K095', 
             'name': 'DM Zaprešić',
-            'url': 'https://www.dm.hr/store/k095/zapresic/industrijska-ulica-1a'
         }
     ],
     'muller': [
@@ -391,78 +390,73 @@ def check_studenac(stores_config):
 def check_dm(stores_config):
     results = []
     dm_stores = stores_config.get('dm', [])
+    next_sunday = get_next_sunday().date()
 
     for my_store in dm_stores:
         store_id = my_store['storeId']
         name = my_store['name']
-        url = my_store.get('url', f'https://www.dm.hr/store/{store_id.lower()}')
         
         try:
-            print(f"Scraping DM HTML: {url}")
-            resp = requests.get(url, timeout=15, headers=HEADERS)
-            resp.raise_for_status()
-
-            # Get all text from page
-            html_text = resp.text.lower()
+            print(f"Checking DM {store_id} via API...")
+            url = f"https://store-data-service.services.dmtech.com/stores/item/{store_id}"
+            response = requests.get(url, timeout=15, headers=HEADERS)
+            response.raise_for_status()
+            store_data = response.json()
             
-            # Simple approach: search for "nedjelja" in entire HTML
-            if 'nedjelja' in html_text:
-                print(f"DM: Found 'nedjelja' in HTML")
-                
-                # Check if followed by "zatvoreno"
-                # Look for pattern: nedjelja...zatvoreno within reasonable distance
-                soup = BeautifulSoup(resp.text, 'html.parser')
-                page_text = soup.get_text(separator=' ', strip=True).lower()
-                
-                # Find position of nedjelja
-                nedjelja_pos = page_text.find('nedjelja')
-                if nedjelja_pos != -1:
-                    # Check next 200 characters for zatvoreno or time pattern
-                    snippet = page_text[nedjelja_pos:nedjelja_pos + 200]
-                    print(f"DM: Text after 'nedjelja': {snippet[:100]}")
-                    
-                    if 'zatvoreno' in snippet:
-                        results.append({
-                            'chain': 'DM',
-                            'name': name,
-                            'open': False,
-                            'hours': 'Zatvoreno'
-                        })
-                    else:
-                        # Try to find time pattern
-                        match = re.search(r'(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})', snippet)
-                        if match:
-                            results.append({
-                                'chain': 'DM',
-                                'name': name,
-                                'open': True,
-                                'hours': f'{match.group(1)} - {match.group(2)}'
-                            })
-                        else:
-                            results.append({
-                                'chain': 'DM',
-                                'name': name,
-                                'open': False,
-                                'hours': 'Nema podataka'
-                            })
-                else:
-                    results.append({
-                        'chain': 'DM',
-                        'name': name,
-                        'open': False,
-                        'hours': 'Nema podataka'
-                    })
-            else:
-                print(f"DM: 'nedjelja' NOT found in HTML")
+            print(f"DM API: Got response for {store_id}")
+            
+            # Check standard opening hours (weekDay: 0 or 7 = Sunday)
+            sunday_hours = None
+            for hours in store_data.get('openingHours', []):
+                if hours.get('weekDay') in [0, 7]:
+                    time_ranges = hours.get('timeRanges', [])
+                    if time_ranges:
+                        sunday_hours = time_ranges[0]
+                        print(f"DM: Found Sunday in openingHours: {sunday_hours}")
+                    break
+            
+            # Check extraOpeningDays for this specific Sunday
+            for extra_day in store_data.get('extraOpeningDays', []):
+                try:
+                    extra_date = datetime.strptime(extra_day['date'], '%Y-%m-%d').date()
+                    if extra_date == next_sunday:
+                        time_ranges = extra_day.get('timeRanges', [])
+                        if time_ranges:
+                            sunday_hours = time_ranges[0]
+                            print(f"DM: Found Sunday in extraOpeningDays: {sunday_hours}")
+                        break
+                except:
+                    continue
+            
+            # Check extraClosingDates
+            is_closed = False
+            for closing_date in store_data.get('extraClosingDates', []):
+                try:
+                    close_date = datetime.strptime(closing_date['date'], '%Y-%m-%d').date()
+                    if close_date == next_sunday:
+                        is_closed = True
+                        print(f"DM: Found Sunday in extraClosingDates - closed")
+                        break
+                except:
+                    continue
+            
+            if is_closed or not sunday_hours:
                 results.append({
                     'chain': 'DM',
                     'name': name,
                     'open': False,
-                    'hours': 'Nema podataka'
+                    'hours': 'Zatvoreno'
                 })
-
+            else:
+                results.append({
+                    'chain': 'DM',
+                    'name': name,
+                    'open': True,
+                    'hours': f"{sunday_hours['opening']} - {sunday_hours['closing']}"
+                })
+                
         except Exception as e:
-            print(f"DM scrape ERROR for {url}: {e}")
+            print(f"DM API error for {store_id}: {e}")
             import traceback
             traceback.print_exc()
             results.append({
@@ -473,6 +467,7 @@ def check_dm(stores_config):
             })
     
     return results
+
 
 
 
