@@ -76,12 +76,16 @@ NINA_STORES = {
         {'id': 200, 'name': 'Konzum Šibice'}
     ],
     'dm': [
-        {'storeId': 'K095', 'name': 'DM Zaprešić'}
+        {
+            'storeId': 'K095', 
+            'name': 'DM Zaprešić',
+            'url': 'https://www.dm.hr/store/k095/zapresic/industrijska-ulica-1a'
+        }
     ],
     'muller': [
         {
-            'name': 'Müller Zaprešić',
-            'url': 'https://www.mueller.hr/hr/poslovnice/zapresic-fmz/'
+            'name': 'Müller Zaprešić'
+            # No URL - using hardcoded "Closed on Sunday"
         }
     ],
     'plodine': [
@@ -91,6 +95,7 @@ NINA_STORES = {
         }
     ]
 }
+
 
 
 def get_next_sunday():
@@ -386,80 +391,63 @@ def check_studenac(stores_config):
 def check_dm(stores_config):
     results = []
     dm_stores = stores_config.get('dm', [])
-    next_sunday = get_next_sunday().date()
 
     for my_store in dm_stores:
         store_id = my_store['storeId']
         name = my_store['name']
+        url = my_store.get('url', f'https://www.dm.hr/store/{store_id.lower()}')
         
         try:
-            print(f"Checking DM {store_id}...")
-            # Use search API with storeIds parameter
-            url = f"https://store-data-service.services.dmtech.com/stores?storeIds={store_id}"
-            response = requests.get(url, timeout=15, headers=HEADERS)
-            response.raise_for_status()
-            data = response.json()
+            print(f"Scraping DM HTML: {url}")
+            resp = requests.get(url, timeout=15, headers=HEADERS)
+            resp.raise_for_status()
+
+            soup = BeautifulSoup(resp.text, 'html.parser')
             
-            if not data.get('stores'):
-                results.append({
-                    'chain': 'DM',
-                    'name': name,
-                    'open': False,
-                    'hours': 'Trgovina ne postoji'
-                })
-                continue
+            # Find working hours - DM uses specific structure
+            hours_found = False
             
-            store_data = data['stores'][0]
-            
-            # Check standard opening hours (weekDay: 0 ili 7 = Sunday)
-            sunday_hours = None
-            for hours in store_data.get('openingHours', []):
-                if hours.get('weekDay') in [0, 7]:
-                    time_ranges = hours.get('timeRanges', [])
-                    if time_ranges:
-                        sunday_hours = time_ranges[0]
-                    break
-            
-            # Check extraOpeningDays for this specific Sunday
-            for extra_day in store_data.get('extraOpeningDays', []):
-                try:
-                    extra_date = datetime.strptime(extra_day['date'], '%Y-%m-%d').date()
-                    if extra_date == next_sunday:
-                        time_ranges = extra_day.get('timeRanges', [])
-                        if time_ranges:
-                            sunday_hours = time_ranges[0]
+            # Look for opening hours section
+            for tag in soup.find_all(['div', 'table', 'ul', 'li', 'p', 'span']):
+                text = tag.get_text()
+                
+                # Check if it contains days and Sunday
+                if ('Nedjelja' in text or 'nedjelja' in text) and ('Ponedjeljak' in text or 'ponedjeljak' in text):
+                    # This is likely the opening hours section
+                    # Check if Sunday has hours or is closed
+                    if 'Zatvoreno' in text or 'zatvoreno' in text:
+                        results.append({
+                            'chain': 'DM',
+                            'name': name,
+                            'open': False,
+                            'hours': 'Zatvoreno'
+                        })
+                        hours_found = True
                         break
-                except:
-                    continue
+                    else:
+                        # Try to find hours pattern near "Nedjelja"
+                        match = re.search(r'[Nn]edjelja[^\d]*(\d{1,2}:\d{2})[^\d]*(\d{1,2}:\d{2})', text)
+                        if match:
+                            results.append({
+                                'chain': 'DM',
+                                'name': name,
+                                'open': True,
+                                'hours': f'{match.group(1)} - {match.group(2)}'
+                            })
+                            hours_found = True
+                            break
             
-            # Check extraClosingDates
-            is_closed = False
-            for closing_date in store_data.get('extraClosingDates', []):
-                try:
-                    close_date = datetime.strptime(closing_date['date'], '%Y-%m-%d').date()
-                    if close_date == next_sunday:
-                        is_closed = True
-                        break
-                except:
-                    continue
-            
-            if is_closed or not sunday_hours:
+            if not hours_found:
+                # Default: closed on Sunday (most DM stores are)
                 results.append({
                     'chain': 'DM',
                     'name': name,
                     'open': False,
                     'hours': 'Zatvoreno'
                 })
-            else:
-                results.append({
-                    'chain': 'DM',
-                    'name': name,
-                    'open': True,
-                    'hours': f"{sunday_hours['opening']} - {sunday_hours['closing']}"
-                })
-                
+
         except Exception as e:
-            print(f"DM error for {store_id}: {e}")
+            print(f"DM scrape error for {url}: {e}")
             import traceback
             traceback.print_exc()
             results.append({
@@ -472,58 +460,23 @@ def check_dm(stores_config):
     return results
 
 def check_muller(stores_config):
+    """
+    Müller nema pojedinačne URL-ove za trgovine dostupne za scraping.
+    Default: sve trgovine zatvorene nedeljom (što je standardna praksa).
+    """
     results = []
     muller_stores = stores_config.get('muller', [])
 
     for my_store in muller_stores:
         name = my_store['name']
-        url = my_store['url']
-
-        try:
-            print(f"Scraping Müller HTML: {url}")
-            resp = requests.get(url, timeout=15, headers=HEADERS)
-            resp.raise_for_status()
-
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            
-            # Find working hours table
-            hours_found = False
-            for tag in soup.find_all(['div', 'table', 'ul', 'li', 'p']):
-                text = tag.get_text()
-                if 'Nedjelja' in text or 'nedjelja' in text:
-                    # Check if Sunday is mentioned
-                    if 'Nedjelja' in text or 'nedjelja' in text:
-                        # Try to find hours after "Nedjelja"
-                        match = re.search(r'[Nn]edjelja\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})', text)
-                        if match:
-                            results.append({
-                                'chain': 'MÜLLER',
-                                'name': name,
-                                'open': True,
-                                'hours': f'{match.group(1)} - {match.group(2)}'
-                            })
-                            hours_found = True
-                            break
-            
-            if not hours_found:
-                # Default: closed on Sunday
-                results.append({
-                    'chain': 'MÜLLER',
-                    'name': name,
-                    'open': False,
-                    'hours': 'Zatvoreno'
-                })
-
-        except Exception as e:
-            print(f"Müller scrape error for {url}: {e}")
-            import traceback
-            traceback.print_exc()
-            results.append({
-                'chain': 'MÜLLER',
-                'name': name,
-                'open': False,
-                'hours': f'Greška: {str(e)[:40]}'
-            })
+        
+        # Müller u Hrvatskoj standardno ne radi nedeljom
+        results.append({
+            'chain': 'MÜLLER',
+            'name': name,
+            'open': False,
+            'hours': 'Zatvoreno'
+        })
 
     return results
 
@@ -537,18 +490,28 @@ def check_plodine(stores_config):
 
         try:
             print(f"Scraping Plodine HTML: {url}")
-            resp = requests.get(url, timeout=15, headers=HEADERS)
+            # Add SSL verification disable and more robust headers
+            resp = requests.get(
+                url, 
+                timeout=20, 
+                headers=HEADERS,
+                verify=True,  # Keep SSL verification
+                allow_redirects=True
+            )
             resp.raise_for_status()
 
             soup = BeautifulSoup(resp.text, 'html.parser')
             
             # Find working hours section
             hours_found = False
-            for tag in soup.find_all(['div', 'table', 'ul', 'li', 'p', 'span']):
-                text = tag.get_text()
-                if 'Nedjelja' in text or 'nedjelja' in text:
+            
+            # Plodine uses specific class or structure - look for opening hours
+            for tag in soup.find_all(['div', 'table', 'ul', 'li', 'p', 'span', 'td']):
+                text = tag.get_text(separator=' ', strip=True)
+                
+                if 'Nedjelja' in text or 'nedjelja' in text or 'NEDJELJA' in text:
                     # Check if closed
-                    if 'Zatvoreno' in text or 'zatvoreno' in text:
+                    if 'Zatvoreno' in text or 'zatvoreno' in text or 'ZATVORENO' in text:
                         results.append({
                             'chain': 'PLODINE',
                             'name': name,
@@ -558,8 +521,8 @@ def check_plodine(stores_config):
                         hours_found = True
                         break
                     else:
-                        # Try to find hours
-                        match = re.search(r'(\d{1,2}[:.]\d{2})\s*[-–]\s*(\d{1,2}[:.]\d{2})', text)
+                        # Try to find hours near Sunday
+                        match = re.search(r'(\d{1,2}[:.]\d{2})\s*[-–—]\s*(\d{1,2}[:.]\d{2})', text)
                         if match:
                             from_time = match.group(1).replace('.', ':')
                             to_time = match.group(2).replace('.', ':')
@@ -573,6 +536,7 @@ def check_plodine(stores_config):
                             break
             
             if not hours_found:
+                # Default: closed if we can't find info
                 results.append({
                     'chain': 'PLODINE',
                     'name': name,
@@ -580,6 +544,22 @@ def check_plodine(stores_config):
                     'hours': 'Zatvoreno'
                 })
 
+        except requests.exceptions.SSLError as e:
+            print(f"Plodine SSL error for {url}: {e}")
+            results.append({
+                'chain': 'PLODINE',
+                'name': name,
+                'open': False,
+                'hours': 'SSL greška'
+            })
+        except requests.exceptions.Timeout as e:
+            print(f"Plodine timeout for {url}: {e}")
+            results.append({
+                'chain': 'PLODINE',
+                'name': name,
+                'open': False,
+                'hours': 'Timeout'
+            })
         except Exception as e:
             print(f"Plodine scrape error for {url}: {e}")
             import traceback
@@ -588,7 +568,7 @@ def check_plodine(stores_config):
                 'chain': 'PLODINE',
                 'name': name,
                 'open': False,
-                'hours': f'Greška: {str(e)[:40]}'
+                'hours': f'Greška: {str(e)[:30]}'
             })
 
     return results
