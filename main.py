@@ -677,115 +677,112 @@ def check_lidl(stores_config):
                 store_url += '/'
             payload_url = store_url + '_payload.json'
             
-            print(f"Lidl: Fetching {payload_url}")
-            
             response = requests.get(payload_url, headers=HEADERS, timeout=15)
             response.raise_for_status()
             payload = response.json()
             
             print(f"Lidl: Got payload with {len(payload)} elements")
             
-            # Search for openingHours in payload (Nuxt uses reference system)
+            # Search for openingHours in payload
             opening_hours_ref = None
             opening_hours_data = None
             
-            # Scan payload for object with openingHours key
             for idx, item in enumerate(payload):
                 if isinstance(item, dict) and 'openingHours' in item:
                     opening_hours_ref = item['openingHours']
-                    print(f"Lidl: Found openingHours reference at index {idx}: {opening_hours_ref}")
                     
-                    # Check if it's a direct object or a reference (integer)
                     if isinstance(opening_hours_ref, dict):
                         opening_hours_data = opening_hours_ref
-                    elif isinstance(opening_hours_ref, int):
-                        # It's a reference - follow it
-                        if 0 <= opening_hours_ref < len(payload):
-                            opening_hours_data = payload[opening_hours_ref]
-                            print(f"Lidl: Followed reference to index {opening_hours_ref}")
+                    elif isinstance(opening_hours_ref, int) and 0 <= opening_hours_ref < len(payload):
+                        opening_hours_data = payload[opening_hours_ref]
                     break
             
-            if not opening_hours_data:
+            if not opening_hours_data or not isinstance(opening_hours_data, dict) or 'items' not in opening_hours_data:
                 raise Exception("No opening hours data in payload")
             
-            if opening_hours_data and isinstance(opening_hours_data, dict) and 'items' in opening_hours_data:
-                today = datetime.now()
-                days_until_sunday = (6 - today.weekday()) % 7
-                if days_until_sunday == 0:
-                    days_until_sunday = 7
-                next_sunday = today + timedelta(days=days_until_sunday)
-                sunday_date_str = next_sunday.strftime('%Y-%m-%d')
+            today = datetime.now()
+            days_until_sunday = (6 - today.weekday()) % 7
+            if days_until_sunday == 0:
+                days_until_sunday = 7
+            next_sunday = today + timedelta(days=days_until_sunday)
+            sunday_date_str = next_sunday.strftime('%Y-%m-%d')
+            
+            print(f"Lidl: Looking for Sunday: {sunday_date_str}")
+            
+            items = opening_hours_data['items']
+            
+            # items might be a reference
+            if isinstance(items, int) and 0 <= items < len(payload):
+                items = payload[items]
+            
+            sunday_hours = None
+            for item in items:
+                # item might be a reference
+                if isinstance(item, int) and 0 <= item < len(payload):
+                    item = payload[item]
                 
-                print(f"Lidl: Looking for Sunday: {sunday_date_str}")
-                
-                items = opening_hours_data['items']
-                
-                # items might also be a reference
-                if isinstance(items, int):
-                    items = payload[items]
-                
-                sunday_hours = None
-                for item in items:
-                    # item might be a reference too
-                    if isinstance(item, int):
-                        item = payload[item]
+                if isinstance(item, dict):
+                    item_date = item.get('date')
                     
-                    if isinstance(item, dict) and item.get('date') == sunday_date_str:
+                    # RESOLVE DATE REFERENCE
+                    if isinstance(item_date, int) and 0 <= item_date < len(payload):
+                        item_date = payload[item_date]
+                    
+                    if item_date == sunday_date_str:
                         sunday_hours = item
-                        print(f"Lidl: Found Sunday hours!")
+                        print(f"Lidl: Found Sunday data!")
                         break
+            
+            if not sunday_hours:
+                print(f"Lidl {name}: Sunday data not found in payload")
+                results.append({
+                    'chain': 'LIDL',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Podaci nedostupni'
+                })
+                continue
+            
+            time_ranges = sunday_hours.get('timeRanges', [])
+            
+            # time_ranges might be a reference
+            if isinstance(time_ranges, int) and 0 <= time_ranges < len(payload):
+                time_ranges = payload[time_ranges]
+            
+            if isinstance(time_ranges, list) and len(time_ranges) > 0:
+                time_range = time_ranges[0]
                 
-                if sunday_hours:
-                    time_ranges = sunday_hours.get('timeRanges', [])
-                    
-                    # time_ranges might be a reference
-                    if isinstance(time_ranges, int):
-                        time_ranges = payload[time_ranges]
-                    
-                    if isinstance(time_ranges, list) and len(time_ranges) > 0:
-                        time_range = time_ranges[0]
-                        
-                        # time_range might be a reference
-                        if isinstance(time_range, int):
-                            time_range = payload[time_range]
-                        
-                        from_time = time_range.get('from', '')
-                        to_time = time_range.get('to', '')
-                        
-                        # These might also be references
-                        if isinstance(from_time, int):
-                            from_time = payload[from_time]
-                        if isinstance(to_time, int):
-                            to_time = payload[to_time]
-                        
-                        from_hm = from_time.split('T')[1][:5] if 'T' in str(from_time) else ''
-                        to_hm = to_time.split('T')[1][:5] if 'T' in str(to_time) else ''
-                        
-                        print(f"Lidl {name}: Sunday hours {from_hm} - {to_hm}")
-                        results.append({
-                            'chain': 'LIDL',
-                            'name': name,
-                            'open': True,
-                            'hours': f'{from_hm} - {to_hm}'
-                        })
-                    else:
-                        print(f"Lidl {name}: Closed on Sunday")
-                        results.append({
-                            'chain': 'LIDL',
-                            'name': name,
-                            'open': False,
-                            'hours': 'Zatvoreno'
-                        })
-                else:
-                    print(f"Lidl {name}: Sunday data not found")
-                    results.append({
-                        'chain': 'LIDL',
-                        'name': name,
-                        'open': False,
-                        'hours': 'Podaci nedostupni'
-                    })
+                # time_range might be a reference
+                if isinstance(time_range, int) and 0 <= time_range < len(payload):
+                    time_range = payload[time_range]
+                
+                from_time = time_range.get('from', '')
+                to_time = time_range.get('to', '')
+                
+                # Resolve time references
+                if isinstance(from_time, int) and 0 <= from_time < len(payload):
+                    from_time = payload[from_time]
+                if isinstance(to_time, int) and 0 <= to_time < len(payload):
+                    to_time = payload[to_time]
+                
+                from_hm = from_time.split('T')[1][:5] if 'T' in str(from_time) else ''
+                to_hm = to_time.split('T')[1][:5] if 'T' in str(to_time) else ''
+                
+                print(f"Lidl {name}: Sunday hours {from_hm} - {to_hm}")
+                results.append({
+                    'chain': 'LIDL',
+                    'name': name,
+                    'open': True,
+                    'hours': f'{from_hm} - {to_hm}'
+                })
             else:
-                raise Exception("No opening hours items in payload")
+                print(f"Lidl {name}: Closed on Sunday")
+                results.append({
+                    'chain': 'LIDL',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Zatvoreno'
+                })
                 
         except Exception as e:
             print(f"Lidl error for {name}: {e}")
@@ -799,6 +796,7 @@ def check_lidl(stores_config):
             })
     
     return results
+
 
 
 
