@@ -3,6 +3,7 @@ import requests
 from datetime import datetime, timedelta
 import json
 from threading import Lock
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
@@ -21,6 +22,18 @@ MY_STORES = {
     ],
     'kaufland': [
         {'id': 'HR5630', 'name': 'Kaufland Jankomir'}
+    ],
+    'lidl': [
+        {
+            'name': 'Lidl Huzjanova',
+            'url': 'https://www.lidl.hr/s/hr-HR/trazilica-trgovina/zagreb/huzjanova-ulica-4/'  #
+        }
+    ],
+    'studenac': [
+        {
+            'name': 'Studenac Gospodska',
+            'url': 'https://www.studenac.hr/trgovine/1578/t1715-zagreb'  # OVDJE STAVI SVOJ TOČAN URL
+        }
     ]
 }
 
@@ -245,15 +258,188 @@ def check_kaufland():
             results.append({'chain': 'KAUFLAND', 'name': my_store['name'], 'open': False, 'hours': f'Greska: {str(e)[:30]}'})
     return results
 
+def check_lidl():
+    """
+    Scrapa HTML stranice konkretne Lidl trgovine i gleda nedjelju.
+    Logika:
+    - na stranici postoji blok 'Radno vrijeme'
+    - u tablici/ul postoji red s 'ned' ili 'nedjelja'
+    - ako u tom redu piše 'Zatvoreno' -> zatvoreno
+    - inače pokušamo izvući sate '08:00 - 21:00'
+    """
+    results = []
+
+    for my_store in MY_STORES.get('lidl', []):
+        name = my_store['name']
+        url = my_store['url']
+
+        try:
+            print(f"Scraping Lidl HTML: {url}")
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+
+            soup = BeautifulSoup(resp.text, 'html.parser')
+
+            # Nađi sekciju s radnim vremenom – ovo je heuristika, možeš kasnije prilagoditi
+            text = soup.get_text(separator='\n', strip=True).lower()
+
+            # Probamo naći liniju s "ned" ili "nedjelja"
+            lines = text.split('\n')
+            sunday_line = None
+            for line in lines:
+                if 'nedjelja' in line or line.strip().startswith('ned'):
+                    sunday_line = line
+                    break
+
+            if not sunday_line:
+                results.append({
+                    'chain': 'LIDL',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Nema informacija (HTML se promijenio)'
+                })
+                continue
+
+            if 'zatvoreno' in sunday_line:
+                results.append({
+                    'chain': 'LIDL',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Zatvoreno'
+                })
+            else:
+                # Pokušaj izvući sate u formatu 08:00 - 21:00
+                import re
+                match = re.search(r'(\d{1,2}[:.]\d{2}).{0,5}(\d{1,2}[:.]\d{2})', sunday_line)
+                if match:
+                    from_time = match.group(1).replace('.', ':')
+                    to_time = match.group(2).replace('.', ':')
+                    results.append({
+                        'chain': 'LIDL',
+                        'name': name,
+                        'open': True,
+                        'hours': f'{from_time} - {to_time}'
+                    })
+                else:
+                    # Nema jasnog raspona, ali nije zatvoreno
+                    results.append({
+                        'chain': 'LIDL',
+                        'name': name,
+                        'open': True,
+                        'hours': 'Otvoreno (sate nisam uspio parsirati)'
+                    })
+
+        except Exception as e:
+            print(f"Lidl scrape error for {url}: {e}")
+            results.append({
+                'chain': 'LIDL',
+                'name': name,
+                'open': False,
+                'hours': f'Greška scraper: {str(e)[:40]}'
+            })
+
+    return results
+
+def check_studenac():
+    """
+    Scrapa HTML stranice konkretne Studenac trgovine.
+    Logika:
+    - postoji lista radnih dana s 'Nedjelja' i <strong>Zatvoreno</strong> ili satima
+    - ako nađemo 'Nedjelja' + 'Zatvoreno' -> zatvoreno
+    - ako nađemo 'Nedjelja' + '07:00-21:00' -> otvoreno
+    """
+    results = []
+
+    for my_store in MY_STORES.get('studenac', []):
+        name = my_store['name']
+        url = my_store['url']
+
+        try:
+            print(f"Scraping Studenac HTML: {url}")
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+
+            soup = BeautifulSoup(resp.text, 'html.parser')
+
+            # Nađi blok radnog vremena
+            # U HTML-u koji si slao bio je <div class="marketsingleworkhours"> s li elementima
+            work_hours_div = soup.find('div', class_='marketsingleworkhours')
+            if not work_hours_div:
+                # fallback: traži bilo koji li koji sadrži "Nedjelja"
+                lis = soup.find_all('li')
+            else:
+                lis = work_hours_div.find_all('li')
+
+            sunday_text = None
+            for li in lis:
+                txt = li.get_text(separator=' ', strip=True)
+                if 'Nedjelja' in txt:
+                    sunday_text = txt
+                    break
+
+            if not sunday_text:
+                results.append({
+                    'chain': 'STUDENAC',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Nema informacija (HTML se promijenio)'
+                })
+                continue
+
+            if 'Zatvoreno' in sunday_text:
+                results.append({
+                    'chain': 'STUDENAC',
+                    'name': name,
+                    'open': False,
+                    'hours': 'Zatvoreno'
+                })
+            else:
+                # Očekujemo nešto poput "Nedjelja 07:00-21:00"
+                import re
+                match = re.search(r'(\d{1,2}[:.]\d{2})\s*[-–]\s*(\d{1,2}[:.]\d{2})', sunday_text)
+                if match:
+                    from_time = match.group(1).replace('.', ':')
+                    to_time = match.group(2).replace('.', ':')
+                    results.append({
+                        'chain': 'STUDENAC',
+                        'name': name,
+                        'open': True,
+                        'hours': f'{from_time} - {to_time}'
+                    })
+                else:
+                    results.append({
+                        'chain': 'STUDENAC',
+                        'name': name,
+                        'open': True,
+                        'hours': 'Otvoreno (sate nisam uspio parsirati)'
+                    })
+
+        except Exception as e:
+            print(f"Studenac scrape error for {url}: {e}")
+            results.append({
+                'chain': 'STUDENAC',
+                'name': name,
+                'open': False,
+                'hours': f'Greška scraper: {str(e)[:40]}'
+            })
+
+    return results
+
 def fetch_fresh_data():
     print("=== FETCHING FRESH DATA ===")
     next_sunday = get_next_sunday()
+
     results = []
     results.extend(check_spar())
     results.extend(check_konzum())
     results.extend(check_kaufland())
+    results.extend(check_lidl())       # NOVO
+    results.extend(check_studenac())   # NOVO
+
     print(f"Total stores: {len(results)}")
+
     results.sort(key=lambda x: (not x['open'], x['chain'], x['name']))
+
     return {
         'success': True,
         'date': next_sunday.strftime('%d.%m.%Y'),
@@ -267,6 +453,7 @@ def fetch_fresh_data():
         'cached': False,
         'last_update': datetime.now().strftime('%H:%M')
     }
+
 
 @app.route('/')
 def index():
