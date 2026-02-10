@@ -7,6 +7,35 @@ from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent
+
+def static_version() -> str:
+    """
+    Vrati timestamp zadnje izmjene bilo kojeg 'static' fajla.
+    Ako nema static direktorija, vrati '1'.
+    """
+    static_dir = BASE_DIR / "static"
+    if not static_dir.exists():
+        return "1"
+
+    latest = 0
+    for root, _, files in os.walk(static_dir):
+        for f in files:
+            path = Path(root) / f
+            try:
+                mtime = int(path.stat().st_mtime)
+                if mtime > latest:
+                    latest = mtime
+            except OSError:
+                continue
+
+    return str(latest or 1)
+
+STATIC_VERSION = static_version()
+
 cache = {'data': None, 'timestamp': None, 'date': None}
 cache_lock = Lock()
 CACHE_DURATION_HOURS = 6
