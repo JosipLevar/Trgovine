@@ -408,7 +408,7 @@ def fetch_fresh_data():
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    return render_template_string(HTML_TEMPLATE.replace('__VERSION__', STATIC_VERSION))
 
 @app.route('/api/check')
 def check_all():
@@ -428,7 +428,7 @@ def check_all():
         print(f"API check error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-HTML_TEMPLATE = f'''<!DOCTYPE html>
+HTML_TEMPLATE = '''<!DOCTYPE html>
 <html lang="hr">
 <head>
 <meta charset="UTF-8">
