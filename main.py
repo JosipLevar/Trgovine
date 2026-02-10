@@ -680,11 +680,8 @@ def check_lidl(stores_config):
             
             # Try multiple regex patterns
             patterns = [
-                # Pattern 1: Standard __NUXT_DATA__
                 r'<script[^>]*id=["\']__NUXT_DATA__["\'][^>]*>\s*(\[[\s\S]*?\])\s*</script>',
-                # Pattern 2: More flexible with any attributes
                 r'id=["\']__NUXT_DATA__["\'][^>]*>\s*(\[[\s\S]+?\])\s*</script>',
-                # Pattern 3: Without id attribute quotes
                 r'<script[^>]*id=__NUXT_DATA__[^>]*>\s*(\[[\s\S]*?\])\s*</script>',
             ]
             
@@ -701,7 +698,6 @@ def check_lidl(stores_config):
                         continue
             
             if not payload:
-                # Fallback: Search for any large JSON array in script tags
                 print(f"Lidl: Trying fallback - searching all script tags")
                 script_tags = re.findall(r'<script[^>]*>([\s\S]*?)</script>', html_content)
                 for script_content in script_tags:
@@ -717,25 +713,40 @@ def check_lidl(stores_config):
             if not payload:
                 raise Exception("Nuxt payload not found in HTML")
             
-            # Recursive search for openingHours
-            def find_key(data, target_key):
-                if isinstance(data, dict):
-                    if target_key in data:
-                        return data[target_key]
-                    for value in data.values():
-                        result = find_key(value, target_key)
-                        if result is not None:
-                            return result
-                elif isinstance(data, list):
-                    for item in data:
-                        result = find_key(item, target_key)
-                        if result is not None:
-                            return result
-                return None
+            # DEBUG: Print payload structure
+            print(f"Lidl: Payload type: {type(payload)}, length: {len(payload) if isinstance(payload, list) else 'N/A'}")
             
-            opening_hours_data = find_key(payload, 'openingHours')
+            # Search for openingHours in payload (Nuxt uses reference system)
+            opening_hours_ref = None
+            opening_hours_data = None
             
-            if opening_hours_data and 'items' in opening_hours_data:
+            # Scan payload for object with openingHours key
+            for idx, item in enumerate(payload):
+                if isinstance(item, dict) and 'openingHours' in item:
+                    opening_hours_ref = item['openingHours']
+                    print(f"Lidl: Found openingHours reference at index {idx}: {opening_hours_ref}")
+                    
+                    # Check if it's a direct object or a reference (integer)
+                    if isinstance(opening_hours_ref, dict):
+                        opening_hours_data = opening_hours_ref
+                        print(f"Lidl: openingHours is direct object")
+                    elif isinstance(opening_hours_ref, int):
+                        # It's a reference - follow it
+                        if 0 <= opening_hours_ref < len(payload):
+                            opening_hours_data = payload[opening_hours_ref]
+                            print(f"Lidl: Followed reference to index {opening_hours_ref}")
+                        else:
+                            print(f"Lidl: Reference {opening_hours_ref} out of bounds")
+                    break
+            
+            if not opening_hours_data:
+                print(f"Lidl: openingHours not found in payload")
+                raise Exception("No opening hours data in payload")
+            
+            print(f"Lidl: openingHours data type: {type(opening_hours_data)}")
+            print(f"Lidl: openingHours keys: {opening_hours_data.keys() if isinstance(opening_hours_data, dict) else 'not a dict'}")
+            
+            if opening_hours_data and isinstance(opening_hours_data, dict) and 'items' in opening_hours_data:
                 today = datetime.now()
                 days_until_sunday = (6 - today.weekday()) % 7
                 if days_until_sunday == 0:
@@ -743,21 +754,54 @@ def check_lidl(stores_config):
                 next_sunday = today + timedelta(days=days_until_sunday)
                 sunday_date_str = next_sunday.strftime('%Y-%m-%d')
                 
+                print(f"Lidl: Looking for Sunday date: {sunday_date_str}")
+                
+                items = opening_hours_data['items']
+                print(f"Lidl: items type: {type(items)}, length: {len(items) if isinstance(items, list) else 'N/A'}")
+                
+                # items might also be a reference
+                if isinstance(items, int):
+                    items = payload[items]
+                    print(f"Lidl: Followed items reference to index")
+                
                 sunday_hours = None
-                for item in opening_hours_data['items']:
-                    if item.get('date') == sunday_date_str:
+                for item in items:
+                    # item might be a reference too
+                    if isinstance(item, int):
+                        item = payload[item]
+                    
+                    if isinstance(item, dict) and item.get('date') == sunday_date_str:
                         sunday_hours = item
+                        print(f"Lidl: Found Sunday data!")
                         break
                 
                 if sunday_hours:
                     time_ranges = sunday_hours.get('timeRanges', [])
                     
-                    if len(time_ranges) > 0:
-                        from_time = time_ranges[0].get('from', '')
-                        to_time = time_ranges[0].get('to', '')
+                    # time_ranges might be a reference
+                    if isinstance(time_ranges, int):
+                        time_ranges = payload[time_ranges]
+                    
+                    print(f"Lidl: timeRanges: {time_ranges}")
+                    
+                    if isinstance(time_ranges, list) and len(time_ranges) > 0:
+                        time_range = time_ranges[0]
                         
-                        from_hm = from_time.split('T')[1][:5] if 'T' in from_time else ''
-                        to_hm = to_time.split('T')[1][:5] if 'T' in to_time else ''
+                        # time_range might be a reference
+                        if isinstance(time_range, int):
+                            time_range = payload[time_range]
+                        
+                        from_time = time_range.get('from', '')
+                        to_time = time_range.get('to', '')
+                        
+                        # These might also be references
+                        if isinstance(from_time, int):
+                            from_time = payload[from_time]
+                        if isinstance(to_time, int):
+                            to_time = payload[to_time]
+                        
+                        from_hm = from_time.split('T')[1][:5] if 'T' in str(from_time) else ''
+                        to_hm = to_time.split('T')[1][:5] if 'T' in str(to_time) else ''
                         
                         print(f"Lidl {name}: Sunday hours {from_hm} - {to_hm}")
                         results.append({
@@ -783,7 +827,7 @@ def check_lidl(stores_config):
                         'hours': 'Podaci nedostupni'
                     })
             else:
-                raise Exception("No opening hours data in payload")
+                raise Exception("No opening hours items in payload")
                 
         except Exception as e:
             print(f"Lidl error for {name}: {e}")
