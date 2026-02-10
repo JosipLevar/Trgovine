@@ -49,7 +49,7 @@ JOSIP_STORES = {
         {'id': 2,  'name': 'City Center West'}
     ],
     'lidl': [
-    {'url': 'https://www.lidl.hr/s/hr-HR/trazilica-trgovina/zagreb/huzjanova-ulica-4', 'name': 'Lidl Huzjanova'}
+    {'url': 'https://www.lidl.hr/s/hr-HR/trazilica-trgovina/zagreb/huzjanova-ulica-4/', 'name': 'Lidl Huzjanova'}
     ],
     'konzum': [
         {'id': 48,  'name': 'Konzum Bolnička'},
@@ -76,7 +76,7 @@ JOSIP_STORES = {
 
 NINA_STORES = {
     'lidl': [
-    {'url': 'https://www.lidl.hr/s/hr-HR/trazilica-trgovina/zapresic/ulica-kardinala-alojzija-stepinca-64', 'name': 'Lidl Zaprešić'}
+    {'url': 'https://www.lidl.hr/s/hr-HR/trazilica-trgovina/zapresic/ulica-kardinala-alojzija-stepinca-64/', 'name': 'Lidl Zaprešić'}
     ],
     'konzum': [
         {'id': 200, 'name': 'Konzum Šibice'}
