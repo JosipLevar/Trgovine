@@ -44,54 +44,132 @@ def is_cache_valid():
     return True
 
 def check_spar():
+    """Provjeri SPAR trgovine (Gospodska 38, King Cross 7) za sljedeću nedjelju."""
     results = []
+
+    # Fallback dok ne dobijemo API response
     for my_store in MY_STORES['spar']:
-        results.append({'chain': 'SPAR', 'name': my_store['name'], 'open': False, 'hours': 'Provjeravam...'})
+        results.append({
+            'chain': 'SPAR',
+            'name': my_store['name'],
+            'open': False,
+            'hours': 'Provjeravam...'
+        })
+
     try:
         print("Checking Spar...")
         url = "https://www.spar.hr/lokacije/_jcr_content.stores.v2.html"
-        params = {'latitude': 45.8133064, 'longitude': 15.8867033, 'radius': 40}
-        response = requests.get(url, params=params, timeout=15)
+        response = requests.get(url, timeout=15)
         response.raise_for_status()
         all_stores = response.json()
         print(f"Spar API returned {len(all_stores)} stores")
-        next_sunday = get_next_sunday()
-        results = []
+
+        next_sunday = get_next_sunday().date()
+        results = []  # reset nakon uspješnog API poziva
+
         for my_store in MY_STORES['spar']:
+            my_id = str(my_store['id'])
             found = False
+
             for store in all_stores:
-                if store.get('locationId') == my_store['id']:
-                    found = True
-                    is_closed = False
-                    for special in store.get('specialShopHours', []):
-                        if special.get('dayType'):
-                            try:
-                                special_date = datetime(special['dayType']['year'], special['dayType']['month'] + 1, special['dayType']['dayOfMonth'])
-                                if special_date.date() == next_sunday.date() and special.get('from1') is None:
-                                    is_closed = True
-                                    break
-                            except:
-                                continue
-                    if not is_closed:
-                        for hours in store.get('shopHours', []):
-                            if hours.get('dayType') == 'nedjelja':
-                                from_h = hours['from1']['hourOfDay']
-                                from_m = hours['from1']['minute']
-                                to_h = hours['to1']['hourOfDay']
-                                to_m = hours['to1']['minute']
-                                results.append({'chain': 'SPAR', 'name': my_store['name'], 'open': True, 'hours': f"{from_h:02d}:{from_m:02d} - {to_h:02d}:{to_m:02d}"})
-                                break
-                    else:
-                        results.append({'chain': 'SPAR', 'name': my_store['name'], 'open': False, 'hours': 'Zatvoreno'})
+                loc_id = str(store.get('locationId'))
+                if loc_id != my_id:
+                    continue
+
+                found = True
+                # default: radi po standardnom nedjeljnom radnom vremenu
+                sunday_from = None
+                sunday_to = None
+
+                # 1) standardni raspored (shopHours → openingHours)
+                for item in store.get('shopHours', []):
+                    oh = item.get('openingHours', {})
+                    if oh.get('dayType') == 'nedjelja':
+                        from1 = oh.get('from1')
+                        to1 = oh.get('to1')
+                        if from1 and to1:
+                            sunday_from = (from1['hourOfDay'], from1['minute'])
+                            sunday_to = (to1['hourOfDay'], to1['minute'])
+                        break
+
+                # 2) specialShopHours – override za konkretne datume
+                closed_override = False
+                for special in store.get('specialShopHours', []):
+                    oh = special.get('openingHours', {})
+                    day = oh.get('dayType')
+                    if not day:
+                        continue
+
+                    # dayType je cijeli datum objekt: {year, month, dayOfMonth,...}
+                    try:
+                        special_date = datetime(
+                            day['year'],
+                            day['month'] + 1,      # Sparov month je 0-based
+                            day['dayOfMonth']
+                        ).date()
+                    except Exception as e:
+                        print(f"SPAR special date parse error: {e}")
+                        continue
+
+                    if special_date != next_sunday:
+                        continue
+
+                    # ako je override za baš tu nedjelju
+                    from1 = oh.get('from1')
+                    to1 = oh.get('to1')
+                    if from1 is None and to1 is None:
+                        # potpuno zatvoreno
+                        closed_override = True
+                        sunday_from = None
+                        sunday_to = None
+                    elif from1 and to1:
+                        # posebno radno vrijeme
+                        sunday_from = (from1['hourOfDay'], from1['minute'])
+                        sunday_to = (to1['hourOfDay'], to1['minute'])
                     break
+
+                if sunday_from and sunday_to:
+                    from_h, from_m = sunday_from
+                    to_h, to_m = sunday_to
+                    results.append({
+                        'chain': 'SPAR',
+                        'name': my_store['name'],
+                        'open': True,
+                        'hours': f"{from_h:02d}:{from_m:02d} - {to_h:02d}:{to_m:02d}"
+                    })
+                else:
+                    # ili nema nedjeljnog radnog vremena, ili je special override zatvorio dućan
+                    status = 'Zatvoreno' if closed_override or sunday_from is None else 'Nema podataka'
+                    results.append({
+                        'chain': 'SPAR',
+                        'name': my_store['name'],
+                        'open': False,
+                        'hours': status
+                    })
+
+                break  # našli smo taj store, nema smisla dalje ići po all_stores
+
             if not found:
-                results.append({'chain': 'SPAR', 'name': my_store['name'], 'open': False, 'hours': 'Trgovina ne postoji'})
+                results.append({
+                    'chain': 'SPAR',
+                    'name': my_store['name'],
+                    'open': False,
+                    'hours': 'Trgovina ne postoji u API-ju'
+                })
+
     except Exception as e:
         print(f"Spar error: {e}")
         results = []
         for my_store in MY_STORES['spar']:
-            results.append({'chain': 'SPAR', 'name': my_store['name'], 'open': False, 'hours': f'Greska: {str(e)[:30]}'})
+            results.append({
+                'chain': 'SPAR',
+                'name': my_store['name'],
+                'open': False,
+                'hours': f'Greška: {str(e)[:40]}'
+            })
+
     return results
+
 
 def check_konzum():
     results = []
