@@ -1,21 +1,20 @@
-from flask import send_from_directory
-
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    return send_from_directory('static', filename)
-
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, send_from_directory
 import requests
 from datetime import datetime, timedelta
 import json
 from threading import Lock
 from bs4 import BeautifulSoup
-
 import os
 from pathlib import Path
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
+# Custom static route handler
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory('static', filename)
+
+# Cache busting version
 BASE_DIR = Path(__file__).parent
 
 def static_version() -> str:
@@ -412,28 +411,6 @@ def fetch_fresh_data():
     }
 
 
-@app.route('/')
-def index():
-    return render_template_string(HTML_TEMPLATE.replace('__VERSION__', STATIC_VERSION))
-
-@app.route('/api/check')
-def check_all():
-    try:
-        with cache_lock:
-            if is_cache_valid():
-                result = cache['data'].copy()
-                result['cached'] = True
-                return jsonify(result)
-            else:
-                data = fetch_fresh_data()
-                cache['data'] = data
-                cache['timestamp'] = datetime.now()
-                cache['date'] = get_next_sunday().date()
-                return jsonify(data)
-    except Exception as e:
-        print(f"API check error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 HTML_TEMPLATE = '''<!DOCTYPE html>
 <html lang="hr">
 <head>
@@ -482,7 +459,7 @@ h1{color:#333;font-size:1.8em;margin-bottom:5px}
 @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
 .error{background:#ffebee;color:#c62828;padding:15px;border-radius:8px;margin:20px 0}
 .refresh-btn {
-    background: #2563eb; /* plava */
+    background: #2563eb;
     color: white;
     border: none;
     padding: 12px 25px;
@@ -516,9 +493,31 @@ h1{color:#333;font-size:1.8em;margin-bottom:5px}
 <button class="refresh-btn" onclick="loadData()">🔄 Osvježi podatke</button>
 </div>
 <div class="footer">Podaci se cachiraju 6 sati</div>
-<script src="/static/app.js?v={STATIC_VERSION}"></script>
+<script src="/static/app.js?v=__VERSION__"></script>
 </body>
 </html>'''
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE.replace('__VERSION__', STATIC_VERSION))
+
+@app.route('/api/check')
+def check_all():
+    try:
+        with cache_lock:
+            if is_cache_valid():
+                result = cache['data'].copy()
+                result['cached'] = True
+                return jsonify(result)
+            else:
+                data = fetch_fresh_data()
+                cache['data'] = data
+                cache['timestamp'] = datetime.now()
+                cache['date'] = get_next_sunday().date()
+                return jsonify(data)
+    except Exception as e:
+        print(f"API check error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
