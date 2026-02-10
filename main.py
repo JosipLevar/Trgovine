@@ -14,11 +14,12 @@ CACHE_DURATION_HOURS = 6
 MY_STORES = {
     'spar': [
         {'id': 38, 'name': 'SPAR Gospodska'},
-        {'id': 7,  'name': 'INTERSPAR King Cross'}
+        {'id': 7,  'name': 'SPAR King Cross'},
+        {'id': 2,  'name': 'City Center West'}
     ],
     'konzum': [
         {'id': 48,  'name': 'Konzum Bolnička'},
-        {'id': 216, 'name': 'Super Konzum Huzjanova'}
+        {'id': 216, 'name': 'Konzum Huzjanova'}
     ],
     'kaufland': [
         {'id': 'HR5630', 'name': 'Kaufland Jankomir'}
@@ -29,11 +30,11 @@ MY_STORES = {
             'url': 'https://www.studenac.hr/trgovine/1578/t1715-zagreb'
         },
         {
-            'name': 'Studenac Dudovec 57',
+            'name': 'Studenac Dudovec',
             'url': 'https://www.studenac.hr/trgovine/1507/t1568-zagreb'
         },
         {
-            'name': 'Studenac Bolnička 94',
+            'name': 'Studenac Bolnička',
             'url': 'https://www.studenac.hr/trgovine/1543/t1687-zagreb'
         }
     ]
