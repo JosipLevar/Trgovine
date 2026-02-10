@@ -495,7 +495,7 @@ def check_plodine(stores_config):
                 url, 
                 timeout=20, 
                 headers=HEADERS,
-                verify=True,  # Keep SSL verification
+                verify=False,  # SSL bypass
                 allow_redirects=True
             )
             resp.raise_for_status()
