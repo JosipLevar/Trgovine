@@ -100,9 +100,9 @@ NINA_STORES = {
 def get_next_sunday():
     today = datetime.now()
     days_ahead = 6 - today.weekday()
-    if days_ahead <= 0:
+    if days_ahead < 0:   # ← samo ako je negativno (ne može se dogoditi, ali sigurnost)
         days_ahead += 7
-    return today + timedelta(days_ahead)
+    return today + timedelta(days=days_ahead)
 
 def is_cache_valid():
     if cache['data'] is None or cache['timestamp'] is None:
@@ -702,8 +702,7 @@ def check_lidl(stores_config):
             
             today = datetime.now()
             days_until_sunday = (6 - today.weekday()) % 7
-            if days_until_sunday == 0:
-                days_until_sunday = 7
+            # Bez if uvjeta - kad je nedjelja, days_until_sunday = 0, vraća danas ✅
             next_sunday = today + timedelta(days=days_until_sunday)
             sunday_date_str = next_sunday.strftime('%Y-%m-%d')
             
