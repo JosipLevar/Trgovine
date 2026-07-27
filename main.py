@@ -53,7 +53,8 @@ JOSIP_STORES = {
     ],
     'konzum': [
         {'id': 48,  'name': 'Konzum Bolnička'},
-        {'id': 216, 'name': 'Konzum Huzjanova'}
+        {'id': 216, 'name': 'Konzum Huzjanova'},
+        {'id': 1280, 'name': 'Konzum Jankomir'}
     ],
     'kaufland': [
         {'id': 'HR5630', 'name': 'Kaufland Jankomir'}
